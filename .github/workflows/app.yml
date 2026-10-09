@@ -1,0 +1,185 @@
+# ==============================================================================
+# CI DE LA APP ANDROID (carpeta app/)
+# ==============================================================================
+# - compilar:      tests unitarios + APK de depuración (artefacto).
+# - publicar-dev:  en push a main o app-*, publica el APK como Release "dev-latest".
+# - firmar:        en etiquetas v*, genera el APK de release firmado y lo publica.
+#
+# Requisitos del proyecto (app/gradle/):
+# - Gradle 9.5.1 vía wrapper (con distributionSha256Sum).
+# - JVM del daemon: Java 21 de Azul (gradle-daemon-jvm.properties). Se instala
+#   Zulu 21 con setup-java para que Gradle no tenga que descargar un JDK.
+# ==============================================================================
+
+name: App Android
+
+on:
+  push:
+    branches: ['**']
+    # Las rutas no se evalúan en los push de etiquetas: v* siempre dispara.
+    tags: ['v*']
+    paths:
+      - 'app/**'
+      - '.github/workflows/app.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/app.yml'
+  workflow_dispatch:
+
+# Permisos mínimos por defecto; solo los jobs que publican piden escritura.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  compilar:
+    name: Compilar y probar
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v5.0.0
+
+      - name: Instalar Java 21 (Azul Zulu, el que exige el daemon de Gradle)
+        uses: actions/setup-java@v5.0.0
+        with:
+          distribution: zulu
+          java-version: '21'
+
+      # Configura Gradle, valida el wrapper y gestiona la caché.
+      - name: Configurar Gradle con caché
+        uses: gradle/actions/setup-gradle@v5.0.0
+
+      - name: Ejecutar los tests unitarios
+        run: ./gradlew :shared:testAndroidHostTest :androidApp:testDebugUnitTest
+
+      - name: Generar el APK de depuración
+        run: ./gradlew :androidApp:assembleDebug
+
+      - name: Guardar el APK de depuración como artefacto
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: apk-debug
+          path: app/androidApp/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  publicar-dev:
+    name: Publicar dev-latest
+    needs: compilar
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/app-'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Evita que dos publicaciones simultáneas se pisen la Release.
+    concurrency:
+      group: publicar-dev-latest
+      cancel-in-progress: false
+    steps:
+      - name: Recuperar el APK de depuración
+        uses: actions/download-artifact@v5.0.0
+        with:
+          name: apk-debug
+          path: ${{ runner.temp }}/apk
+
+      - name: Publicar la Release dev-latest (sobrescribe la anterior)
+        working-directory: ${{ runner.temp }}/apk
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cp "$(ls *.apk | head -n 1)" pizzeria-dev.apk
+          SHA256=$(sha256sum pizzeria-dev.apk | cut -d' ' -f1)
+
+          # Borrar la Release y la etiqueta anteriores (si existen).
+          gh release delete dev-latest --cleanup-tag --yes || true
+
+          gh release create dev-latest pizzeria-dev.apk \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Versión de desarrollo (${GITHUB_REF_NAME})" \
+            --notes "APK de depuración generado desde \`${GITHUB_REF_NAME}\` (commit ${GITHUB_SHA})."$'\n\n'"SHA-256 de \`pizzeria-dev.apk\`: \`${SHA256}\`"
+
+  # Preparado, aún sin probar.
+  firmar:
+    name: APK de release firmado
+    needs: compilar
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v5.0.0
+
+      - name: Instalar Java 21 (Azul Zulu, el que exige el daemon de Gradle)
+        uses: actions/setup-java@v5.0.0
+        with:
+          distribution: zulu
+          java-version: '21'
+
+      - name: Configurar Gradle con caché
+        uses: gradle/actions/setup-gradle@v5.0.0
+
+      # El proyecto no define signingConfig: se genera el APK sin firmar y se
+      # firma después con apksigner, sin tocar el código.
+      - name: Generar el APK de release sin firmar
+        run: ./gradlew :androidApp:assembleRelease
+
+      - name: Recuperar el keystore desde los secretos
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: Alinear y firmar el APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          SIN_FIRMAR=$(ls androidApp/build/outputs/apk/release/*-unsigned.apk | head -n 1)
+          APK="pizzeria-${GITHUB_REF_NAME}.apk"
+
+          "$BUILD_TOOLS/zipalign" -p -f 4 "$SIN_FIRMAR" "$RUNNER_TEMP/alineado.apk"
+
+          # Las contraseñas se leen de variables de entorno (env:), nunca de la línea de comandos.
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$RUNNER_TEMP/release.jks" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass env:KEY_PASSWORD \
+            --out "$RUNNER_TEMP/$APK" \
+            "$RUNNER_TEMP/alineado.apk"
+
+          "$BUILD_TOOLS/apksigner" verify "$RUNNER_TEMP/$APK"
+
+      - name: Borrar el keystore del runner
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Publicar la Release de la versión
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          APK="pizzeria-${GITHUB_REF_NAME}.apk"
+          SHA256=$(sha256sum "$APK" | cut -d' ' -f1)
+
+          gh release create "$GITHUB_REF_NAME" "$APK" \
+            --verify-tag \
+            --title "Pizzería ${GITHUB_REF_NAME}" \
+            --notes "APK de release firmado."$'\n\n'"SHA-256 de \`${APK}\`: \`${SHA256}\`"
