@@ -3,7 +3,9 @@ package es.fpmola.pizzeria.ui.inicio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -12,11 +14,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 /**
- * Pantalla de inicio (vacía por ahora). Se llega tras una conexión correcta.
+ * Pantalla de inicio. Se llega tras una conexión correcta y desde aquí se
+ * abre la carta.
  */
 @Composable
 fun PantallaInicio(
     urlServidor: String?,
+    alVerCarta: () -> Unit,
     alCambiarServidor: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -36,6 +40,12 @@ fun PantallaInicio(
                 text = "Conectado a $urlServidor",
                 style = MaterialTheme.typography.bodyMedium,
             )
+        }
+        Button(
+            onClick = alVerCarta,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Ver la carta")
         }
         TextButton(onClick = alCambiarServidor) {
             Text("Cambiar servidor")
