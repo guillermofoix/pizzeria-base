@@ -201,7 +201,7 @@ fun PantallaDatosPedido(
                     )
                     Text(text = "Enviando…", modifier = Modifier.padding(start = 12.dp))
                 } else {
-                    Text("Enviar pedido")
+                    Text(if (estado.envioIncierto) "Volver a enviar el pedido" else "Enviar pedido")
                 }
             }
         }
