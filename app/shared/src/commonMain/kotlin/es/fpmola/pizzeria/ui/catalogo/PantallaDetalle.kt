@@ -1,5 +1,6 @@
 package es.fpmola.pizzeria.ui.catalogo
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +17,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +33,7 @@ import es.fpmola.pizzeria.carrito.Carrito
 import es.fpmola.pizzeria.carrito.ResultadoAnadir
 import es.fpmola.pizzeria.catalogo.Pizza
 import es.fpmola.pizzeria.ui.componentes.BotonCarrito
+import es.fpmola.pizzeria.ui.componentes.BotonTexto
 import es.fpmola.pizzeria.ui.componentes.ImagenPizza
 import es.fpmola.pizzeria.ui.componentes.SelectorCantidad
 
@@ -63,7 +64,7 @@ fun PantallaDetalle(
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = alVolver) {
+            BotonTexto(onClick = alVolver) {
                 Text("‹ Volver")
             }
             Spacer(modifier = Modifier.weight(1f))
@@ -116,6 +117,7 @@ private fun BarraAnadirAlCarrito(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -129,7 +131,7 @@ private fun BarraAnadirAlCarrito(
                 text = mensaje,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (pizza.disponible) {
-                    MaterialTheme.colorScheme.primary
+                    MaterialTheme.colorScheme.tertiary
                 } else {
                     MaterialTheme.colorScheme.error
                 },
@@ -196,13 +198,14 @@ private fun ContenidoDetalle(
             Text(
                 text = pizza.nombre,
                 style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onBackground,
             )
 
             if (!pizza.categoriaNombre.isNullOrBlank()) {
                 Text(
                     text = listOfNotNull(pizza.categoriaIcono, pizza.categoriaNombre).joinToString(" "),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.secondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
@@ -213,8 +216,8 @@ private fun ContenidoDetalle(
                 Text(
                     text = pizza.precio.formatear(),
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onBackground,
                 )
                 if (agotada) {
                     Text(
@@ -230,6 +233,7 @@ private fun ContenidoDetalle(
                 Text(
                     text = pizza.descripcion,
                     style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
@@ -245,9 +249,9 @@ private fun ContenidoDetalle(
             if (alergenos.isNotEmpty()) {
                 SeccionTexto(
                     titulo = "Alérgenos",
-                    texto = "Contiene ingredientes alérgenos: " +
+                    texto = "⚠️ Contiene ingredientes alérgenos: " +
                         alergenos.joinToString(", ") { it.nombre },
-                    colorTexto = MaterialTheme.colorScheme.error,
+                    colorTexto = MaterialTheme.colorScheme.secondary,
                 )
             }
         }
@@ -258,13 +262,13 @@ private fun ContenidoDetalle(
 private fun SeccionTexto(
     titulo: String,
     texto: String,
-    colorTexto: Color = MaterialTheme.colorScheme.onSurface,
+    colorTexto: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             text = titulo,
             style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
             text = texto,

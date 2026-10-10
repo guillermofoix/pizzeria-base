@@ -14,8 +14,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -23,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import es.fpmola.pizzeria.ui.componentes.BotonContorno
+import es.fpmola.pizzeria.ui.componentes.CampoTextoPizzeria
 
 /**
  * Pantalla para indicar la dirección del servidor, probar la conexión y
@@ -46,33 +46,32 @@ fun PantallaConfiguracion(
         Text(
             text = "Configuración del servidor",
             style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onBackground,
         )
         Text(
             text = "Escribe la dirección del servidor de la pizzería. Debe empezar por https://",
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        OutlinedTextField(
-            value = estado.url,
-            onValueChange = alCambiarUrl,
-            label = { Text("Dirección del servidor") },
-            placeholder = { Text("https://…") },
-            singleLine = true,
-            enabled = !estado.probando,
-            keyboardOptions = KeyboardOptions(
+        CampoTextoPizzeria(
+            valor = estado.url,
+            alCambiar = alCambiarUrl,
+            etiqueta = "Dirección del servidor",
+            placeholder = "https://…",
+            habilitado = !estado.probando,
+            opcionesTeclado = KeyboardOptions(
                 keyboardType = KeyboardType.Uri,
                 imeAction = ImeAction.Done,
             ),
-            keyboardActions = KeyboardActions(onDone = { alProbarConexion() }),
-            modifier = Modifier.fillMaxWidth(),
+            accionesTeclado = KeyboardActions(onDone = { alProbarConexion() }),
         )
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            OutlinedButton(
+            BotonContorno(
                 onClick = alProbarConexion,
                 enabled = !estado.probando,
             ) {
@@ -88,7 +87,7 @@ fun PantallaConfiguracion(
                 text = mensaje,
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (estado.exito) {
-                    MaterialTheme.colorScheme.primary
+                    MaterialTheme.colorScheme.tertiary
                 } else {
                     MaterialTheme.colorScheme.error
                 },

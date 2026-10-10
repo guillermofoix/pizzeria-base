@@ -1,7 +1,7 @@
 package es.fpmola.pizzeria.ui.pedidos
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,11 +10,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -24,6 +22,12 @@ import androidx.compose.ui.unit.dp
 import es.fpmola.pizzeria.pedidos.LineaPedido
 import es.fpmola.pizzeria.pedidos.Pedido
 import es.fpmola.pizzeria.pedidos.TipoPedido
+import es.fpmola.pizzeria.ui.componentes.BarraProgresoPedido
+import es.fpmola.pizzeria.ui.componentes.BotonContorno
+import es.fpmola.pizzeria.ui.componentes.InsigniaEstado
+import es.fpmola.pizzeria.ui.componentes.TarjetaPizzeria
+import es.fpmola.pizzeria.ui.componentes.emoji
+import es.fpmola.pizzeria.ui.componentes.presentacionEstado
 
 /**
  * Pantalla de pedido confirmado: número, tipo, líneas, total y estado. El
@@ -49,9 +53,9 @@ fun PantallaPedidoConfirmado(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "¡Pedido enviado!",
+                text = "✅ ¡Pedido enviado!",
                 style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onBackground,
             )
 
             if (pedido == null) {
@@ -60,7 +64,10 @@ fun PantallaPedidoConfirmado(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     CircularProgressIndicator()
-                    Text("Cargando tu pedido…")
+                    Text(
+                        text = "Cargando tu pedido…",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             } else {
                 DetallePedido(pedido)
@@ -79,10 +86,11 @@ fun PantallaPedidoConfirmado(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainer)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            OutlinedButton(
+            BotonContorno(
                 onClick = alActualizar,
                 enabled = !estado.actualizando,
             ) {
@@ -102,42 +110,52 @@ fun PantallaPedidoConfirmado(
 private fun DetallePedido(pedido: Pedido) {
     val tipo = pedido.tipo
     val estado = pedido.estadoConocido
+    val presentacion = presentacionEstado(estado)
 
     Text(
         text = "Pedido n.º ${pedido.id}",
         style = MaterialTheme.typography.titleLarge,
+        color = MaterialTheme.colorScheme.onBackground,
     )
 
     // Tipo de pedido y, según el tipo, mesa o dirección.
     Text(
         text = buildString {
+            if (tipo != null) append("${tipo.emoji} ")
             append(tipo?.etiqueta ?: pedido.tipoPedido)
             if (tipo == TipoPedido.Mesa && pedido.mesaNumero != null) {
                 append(" · Mesa ${pedido.mesaNumero}")
             }
         },
         style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurface,
     )
     if (tipo == TipoPedido.Domicilio && !pedido.clienteDireccion.isNullOrBlank()) {
         Text(
             text = "Entrega en: ${pedido.clienteDireccion}",
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 
-    // Estado actual del pedido.
-    Card(modifier = Modifier.fillMaxWidth()) {
+    // Estado actual del pedido: insignia y barra de progreso, como la web.
+    TarjetaPizzeria(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Estado", style = MaterialTheme.typography.labelMedium)
             Text(
-                text = estado?.etiqueta ?: pedido.estado,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                text = "Estado",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            InsigniaEstado(
+                texto = estado?.etiqueta ?: pedido.estado,
+                presentacion = presentacion,
+            )
+            if (presentacion.avance != null) {
+                BarraProgresoPedido(avance = presentacion.avance, color = presentacion.color)
+            }
             Text(
                 text = if (pedido.esFinal) {
                     "El pedido ha terminado."
@@ -145,11 +163,16 @@ private fun DetallePedido(pedido: Pedido) {
                     "Se actualiza solo cada pocos segundos."
                 },
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 
-    Text("Tu pedido", style = MaterialTheme.typography.titleMedium)
+    Text(
+        text = "Tu pedido",
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onBackground,
+    )
     for (linea in pedido.lineas) {
         FilaLinea(linea)
     }
@@ -162,13 +185,14 @@ private fun DetallePedido(pedido: Pedido) {
         Text(
             text = "Total",
             style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.weight(1f),
         )
         Text(
             text = pedido.total.formatear(),
             style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.ExtraBold,
+            color = MaterialTheme.colorScheme.secondary,
         )
     }
     Text(
@@ -178,32 +202,34 @@ private fun DetallePedido(pedido: Pedido) {
             else -> pedido.estadoPago
         },
         style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
 @Composable
 private fun FilaLinea(linea: LineaPedido) {
-    Box(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "${linea.cantidad} × ${linea.nombre}",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                if (!linea.notas.isNullOrBlank()) {
-                    Text(
-                        text = linea.notas,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = linea.subtotalCalculado.formatear(),
+                text = "${linea.cantidad} × ${linea.nombre}",
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
             )
+            if (!linea.notas.isNullOrBlank()) {
+                Text(
+                    text = "⚠️ ${linea.notas}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
         }
+        Text(
+            text = linea.subtotalCalculado.formatear(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
