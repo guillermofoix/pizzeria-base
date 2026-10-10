@@ -26,6 +26,8 @@ import kotlinx.coroutines.delay
  * botones de pago quedan desactivados).
  * @property errorPago aviso de que el pago no se pudo iniciar o comprobar.
  * @property infoPago mensaje informativo sobre el pago (por ejemplo, que aún no consta).
+ * @property esperaPagoAgotada true si el sondeo se detuvo tras esperar el pago
+ * demasiado tiempo: a partir de ahí solo se actualiza con el botón "Actualizar".
  */
 data class EstadoPedidoConfirmado(
     val pedido: Pedido? = null,
@@ -34,6 +36,7 @@ data class EstadoPedidoConfirmado(
     val procesandoPago: Boolean = false,
     val errorPago: String? = null,
     val infoPago: String? = null,
+    val esperaPagoAgotada: Boolean = false,
 )
 
 /**
@@ -146,17 +149,38 @@ class PedidoConfirmadoViewModel(
      * estado es final (entregado, servido o cancelado). Es cancelable: se
      * detiene sola cuando la pantalla que la lanza sale de la composición.
      * Un fallo de red no la detiene: se vuelve a intentar en la siguiente vuelta.
+     *
+     * Si el pedido es con tarjeta y el pago sigue pendiente, NO se detiene en un
+     * estado final: sigue hasta que el servidor marque el pago como pagado.
+     * Para no consultar sin fin, se detiene tras [limitePagoMs] de espera (se
+     * cuenta con los intervalos) y marca [EstadoPedidoConfirmado.esperaPagoAgotada].
+     * Nunca llama a confirmar-sesion: solo lee el pedido.
      */
-    suspend fun sondear(intervaloMs: Long = INTERVALO_SONDEO_MS) {
+    suspend fun sondear(
+        intervaloMs: Long = INTERVALO_SONDEO_MS,
+        limitePagoMs: Long = LIMITE_ESPERA_PAGO_MS,
+    ) {
+        estado = estado.copy(esperaPagoAgotada = false)
+        var esperadoMs = 0L
         while (true) {
             actualizar()
-            if (estado.pedido?.esFinal == true) return
+            val pedido = estado.pedido
+            val pagoPendiente = pedido?.pagoConTarjetaPendiente == true
+            if (pedido?.esFinal == true && !pagoPendiente) return
+            if (pagoPendiente && esperadoMs >= limitePagoMs) {
+                estado = estado.copy(esperaPagoAgotada = true)
+                return
+            }
             delay(intervaloMs)
+            esperadoMs += intervaloMs
         }
     }
 
     companion object {
         /** Tiempo entre consultas: "cada pocos segundos". */
         const val INTERVALO_SONDEO_MS = 5_000L
+
+        /** Tiempo máximo esperando un pago con tarjeta: 15 minutos. */
+        const val LIMITE_ESPERA_PAGO_MS = 15 * 60_000L
     }
 }

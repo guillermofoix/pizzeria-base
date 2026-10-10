@@ -270,6 +270,14 @@ private fun PagoPendiente(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    if (estado.esperaPagoAgotada) {
+        Text(
+            text = "Hemos dejado de comprobar el pago automáticamente. " +
+                "Pulsa «Actualizar» para volver a consultarlo.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     if (estado.errorPago != null) {
         Text(
             text = estado.errorPago,
