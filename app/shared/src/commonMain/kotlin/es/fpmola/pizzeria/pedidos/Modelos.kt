@@ -31,6 +31,12 @@ enum class EstadoPedido(
     }
 }
 
+/** Valor de `metodo_pago` del pago con tarjeta (Stripe Checkout). */
+const val METODO_PAGO_TARJETA = "stripe"
+
+/** Valor de `estado_pago` cuando el servidor ya ha confirmado el pago. */
+const val ESTADO_PAGO_PAGADO = "pagado"
+
 /**
  * Línea del cuerpo de POST /api/pedidos. Solo lleva el id de la pizza (que
  * viene de la carta cargada), la cantidad y notas: el servidor ignora
@@ -110,4 +116,19 @@ data class Pedido(
     /** true si el estado es uno de los finales (un estado desconocido no lo es). */
     val esFinal: Boolean
         get() = estadoConocido?.esFinal == true
+
+    /** true si el pedido se paga con tarjeta (Stripe). */
+    val pagoConTarjeta: Boolean
+        get() = metodoPago == METODO_PAGO_TARJETA
+
+    /** true si el servidor ya ha confirmado el pago. */
+    val pagado: Boolean
+        get() = estadoPago == ESTADO_PAGO_PAGADO
+
+    /**
+     * true si es un pedido con tarjeta que todavía hay que pagar. Un pedido
+     * cancelado no se paga, así que no cuenta como pendiente.
+     */
+    val pagoConTarjetaPendiente: Boolean
+        get() = pagoConTarjeta && !pagado && estadoConocido != EstadoPedido.Cancelado
 }
