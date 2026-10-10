@@ -27,7 +27,7 @@ fun construirPeticion(datos: DatosPedido, lineas: List<LineaCarrito>): PeticionP
         clienteNombre = datos.nombre.trim().ifEmpty { null },
         clienteTelefono = if (esMesa) null else normalizarTelefono(datos.telefono.trim()),
         clienteDireccion = if (datos.tipo == TipoPedido.Domicilio) datos.direccion.trim() else null,
-        metodoPago = datos.tipo.metodoPago,
+        metodoPago = if (datos.pagoConTarjeta) METODO_PAGO_TARJETA else datos.tipo.metodoPago,
         observaciones = datos.observaciones.trim().ifEmpty { null },
         lineas = lineas.map { LineaPeticion(pizzaId = it.pizzaId, cantidad = it.cantidad) },
     )

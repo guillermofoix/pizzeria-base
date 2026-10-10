@@ -1,8 +1,11 @@
 package es.fpmola.pizzeria.ui.pedidos
 
 import es.fpmola.pizzeria.carrito.Carrito
+import es.fpmola.pizzeria.pagos.AbridorUrl
+import es.fpmola.pizzeria.pagos.RepositorioPagos
 import es.fpmola.pizzeria.pedidos.RepositorioPedidos
 import es.fpmola.pizzeria.pedidos.TipoPedido
+import es.fpmola.pizzeria.prueba.AbridorFalso
 import es.fpmola.pizzeria.prueba.AjustesEnMemoria
 import es.fpmola.pizzeria.prueba.JSON_PEDIDO_CREADO
 import es.fpmola.pizzeria.prueba.carritoConDosPizzas
@@ -23,11 +26,19 @@ import kotlinx.coroutines.test.runTest
 
 class DatosPedidoViewModelTest {
 
-    private fun crearViewModel(motor: MockEngine, carrito: Carrito = carritoConDosPizzas()) =
-        DatosPedidoViewModel(
-            repositorio = RepositorioPedidos(crearClientePrueba(AjustesEnMemoria(), motor)),
+    private fun crearViewModel(
+        motor: MockEngine,
+        carrito: Carrito = carritoConDosPizzas(),
+        abridor: AbridorUrl = AbridorFalso(),
+    ): DatosPedidoViewModel {
+        val cliente = crearClientePrueba(AjustesEnMemoria(), motor)
+        return DatosPedidoViewModel(
+            repositorio = RepositorioPedidos(cliente),
             carrito = carrito,
+            repositorioPagos = RepositorioPagos(cliente),
+            abridor = abridor,
         )
+    }
 
     /** Rellena un pedido a domicilio válido. */
     private fun DatosPedidoViewModel.rellenarDomicilio() {

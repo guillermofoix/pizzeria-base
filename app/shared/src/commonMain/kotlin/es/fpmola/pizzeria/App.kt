@@ -184,7 +184,12 @@ fun App(
                     val modelo = viewModel<DatosPedidoViewModel>(
                         key = "datos-$versionServidor-$pedidosEnviados",
                     ) {
-                        DatosPedidoViewModel(Dependencias.repositorioPedidos(), Dependencias.carrito())
+                        DatosPedidoViewModel(
+                            repositorio = Dependencias.repositorioPedidos(),
+                            carrito = Dependencias.carrito(),
+                            repositorioPagos = Dependencias.repositorioPagos(),
+                            abridor = Dependencias.abridorUrl(),
+                        )
                     }
                     val estadoDatos = modelo.estado
 
@@ -232,6 +237,7 @@ fun App(
                         alCambiarTelefono = modelo::cambiarTelefono,
                         alCambiarDireccion = modelo::cambiarDireccion,
                         alCambiarObservaciones = modelo::cambiarObservaciones,
+                        alCambiarPagoConTarjeta = modelo::cambiarPagoConTarjeta,
                         alEnviar = modelo::enviar,
                         alVolver = { pantalla = Pantalla.Carrito },
                         modifier = modificador,

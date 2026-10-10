@@ -4,20 +4,29 @@ package es.fpmola.pizzeria.pedidos
  * Tipo de pedido. Los valores de [valorApi] son los del CHECK de
  * pedidos.tipo_pedido (database/init.sql).
  *
- * @property metodoPago valor de `metodo_pago` que se envía. En la API es un
- * texto libre (por defecto `efectivo_entrega`); se usan los mismos valores que
- * la web. El pago con tarjeta (Stripe) no está implementado todavía.
+ * @property metodoPago valor de `metodo_pago` que se envía cuando se paga en
+ * el local o a la entrega. En la API es un texto libre (por defecto
+ * `efectivo_entrega`); se usan los mismos valores que la web. Si se elige pagar
+ * ahora con tarjeta se envía [METODO_PAGO_TARJETA] en su lugar.
+ * @property etiquetaPago nombre corto de esa opción de pago, para el selector.
  * @property descripcionPago cómo se explica el pago al usuario.
  */
 enum class TipoPedido(
     val valorApi: String,
     val etiqueta: String,
     val metodoPago: String,
+    val etiquetaPago: String,
     val descripcionPago: String,
 ) {
-    Mesa("mesa", "En mesa", "pago_mesa", "El pago se hace en la mesa."),
-    Recoger("recoger", "Para recoger", "efectivo_entrega", "El pago se hace en efectivo al recoger el pedido."),
-    Domicilio("domicilio", "A domicilio", "efectivo_entrega", "El pago se hace en efectivo al recibir el pedido.");
+    Mesa("mesa", "En mesa", "pago_mesa", "Pagar en la mesa", "El pago se hace en la mesa."),
+    Recoger(
+        "recoger", "Para recoger", "efectivo_entrega", "Efectivo al recoger",
+        "El pago se hace en efectivo al recoger el pedido.",
+    ),
+    Domicilio(
+        "domicilio", "A domicilio", "efectivo_entrega", "Efectivo al recibir",
+        "El pago se hace en efectivo al recibir el pedido.",
+    );
 
     companion object {
         /** El tipo que corresponde a un valor de la API, o null si es desconocido. */
@@ -28,6 +37,9 @@ enum class TipoPedido(
 /**
  * Lo que el usuario escribe en la pantalla de datos del pedido. Los números se
  * guardan como texto porque se están editando.
+ *
+ * @property pagoConTarjeta true si el usuario quiere pagar ahora con tarjeta
+ * (para cualquier tipo de pedido); false es el pago habitual del tipo elegido.
  */
 data class DatosPedido(
     val tipo: TipoPedido = TipoPedido.Domicilio,
@@ -36,6 +48,7 @@ data class DatosPedido(
     val telefono: String = "",
     val direccion: String = "",
     val observaciones: String = "",
+    val pagoConTarjeta: Boolean = false,
 )
 
 /** Mensaje de error de cada campo (null si el campo es correcto o no aplica). */

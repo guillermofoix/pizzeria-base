@@ -47,6 +47,7 @@ fun PantallaDatosPedido(
     alCambiarTelefono: (String) -> Unit,
     alCambiarDireccion: (String) -> Unit,
     alCambiarObservaciones: (String) -> Unit,
+    alCambiarPagoConTarjeta: (Boolean) -> Unit,
     alEnviar: () -> Unit,
     alVolver: () -> Unit,
     modifier: Modifier = Modifier,
@@ -170,6 +171,29 @@ fun PantallaDatosPedido(
                 habilitado = editable,
                 unaLinea = false,
             )
+
+            Text(
+                text = "¿Cómo quieres pagar?",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ChipPizzeria(
+                    seleccionado = !datos.pagoConTarjeta,
+                    alPulsar = { alCambiarPagoConTarjeta(false) },
+                    habilitado = editable,
+                    etiqueta = { Text(datos.tipo.etiquetaPago) },
+                )
+                ChipPizzeria(
+                    seleccionado = datos.pagoConTarjeta,
+                    alPulsar = { alCambiarPagoConTarjeta(true) },
+                    habilitado = editable,
+                    etiqueta = { Text("💳 Pagar ahora con tarjeta") },
+                )
+            }
         }
 
         HorizontalDivider()
@@ -181,7 +205,12 @@ fun PantallaDatosPedido(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = datos.tipo.descripcionPago + " El pago con tarjeta llegará más adelante.",
+                text = if (datos.pagoConTarjeta) {
+                    "Pagarás ahora con tarjeta en la página segura de Stripe: al enviar el pedido " +
+                        "se abrirá el navegador."
+                } else {
+                    datos.tipo.descripcionPago
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -210,7 +239,13 @@ fun PantallaDatosPedido(
                     )
                     Text(text = "Enviando…", modifier = Modifier.padding(start = 12.dp))
                 } else {
-                    Text(if (estado.envioIncierto) "Volver a enviar el pedido" else "🚀 Enviar pedido")
+                    Text(
+                        when {
+                            estado.envioIncierto -> "Volver a enviar el pedido"
+                            datos.pagoConTarjeta -> "💳 Enviar pedido y pagar"
+                            else -> "🚀 Enviar pedido"
+                        },
+                    )
                 }
             }
         }
