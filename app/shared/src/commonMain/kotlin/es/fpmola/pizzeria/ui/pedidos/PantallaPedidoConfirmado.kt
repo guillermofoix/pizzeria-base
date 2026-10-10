@@ -38,6 +38,8 @@ import es.fpmola.pizzeria.ui.componentes.presentacionEstado
 fun PantallaPedidoConfirmado(
     estado: EstadoPedidoConfirmado,
     alActualizar: () -> Unit,
+    alPagarConTarjeta: () -> Unit,
+    alComprobarPago: () -> Unit,
     alVolverAlInicio: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -71,6 +73,7 @@ fun PantallaPedidoConfirmado(
                 }
             } else {
                 DetallePedido(pedido)
+                BloquePago(pedido, estado, alPagarConTarjeta, alComprobarPago)
             }
 
             if (estado.error != null) {
@@ -195,15 +198,106 @@ private fun DetallePedido(pedido: Pedido) {
             color = MaterialTheme.colorScheme.secondary,
         )
     }
+    // Con tarjeta, el pago se muestra en su propio bloque (ver BloquePago).
+    if (!pedido.pagoConTarjeta) {
+        Text(
+            text = "Pago: " + when (pedido.estadoPago) {
+                "pagado" -> "pagado"
+                "pendiente", null -> "pendiente (se paga en el local)"
+                else -> pedido.estadoPago
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Pago con tarjeta: "Pago recibido" cuando el servidor lo ha confirmado o
+ * "Pago pendiente" con los botones para pagar y para comprobar. No se muestra
+ * en pedidos que no son con tarjeta.
+ */
+@Composable
+private fun BloquePago(
+    pedido: Pedido,
+    estado: EstadoPedidoConfirmado,
+    alPagarConTarjeta: () -> Unit,
+    alComprobarPago: () -> Unit,
+) {
+    if (!pedido.pagoConTarjeta) return
+
+    TarjetaPizzeria(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Pago",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            when {
+                pedido.pagado -> Text(
+                    text = "✅ Pago recibido",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                !pedido.pagoConTarjetaPendiente -> Text(
+                    text = "El pedido está cancelado: no se cobrará.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> PagoPendiente(estado, alPagarConTarjeta, alComprobarPago)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PagoPendiente(
+    estado: EstadoPedidoConfirmado,
+    alPagarConTarjeta: () -> Unit,
+    alComprobarPago: () -> Unit,
+) {
     Text(
-        text = "Pago: " + when (pedido.estadoPago) {
-            "pagado" -> "pagado"
-            "pendiente", null -> "pendiente (se paga en el local)"
-            else -> pedido.estadoPago
-        },
+        text = "💳 Pago pendiente",
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+        text = "Cuando termines de pagar, Stripe abrirá la web de la pizzería. " +
+            "Vuelve a esta app: se actualizará sola.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    if (estado.errorPago != null) {
+        Text(
+            text = estado.errorPago,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+    if (estado.infoPago != null) {
+        Text(
+            text = estado.infoPago,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Button(
+        onClick = alPagarConTarjeta,
+        enabled = !estado.procesandoPago,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(if (estado.errorPago != null) "Reintentar pago" else "Pagar con tarjeta")
+    }
+    BotonContorno(
+        onClick = alComprobarPago,
+        enabled = !estado.procesandoPago,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Ya he pagado, comprobar")
+    }
 }
 
 @Composable

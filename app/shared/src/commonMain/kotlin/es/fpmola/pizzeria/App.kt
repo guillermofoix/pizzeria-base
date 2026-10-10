@@ -65,6 +65,8 @@ fun App(
         var pedidoConfirmadoId by rememberSaveable { mutableStateOf<Int?>(null) }
         var pedidosEnviados by rememberSaveable { mutableStateOf(0) }
         var pedidoConfirmado by remember { mutableStateOf<Pedido?>(null) }
+        // Aviso de que el pedido con tarjeta se creó pero no se pudo iniciar el pago.
+        var avisoPagoInicial by remember { mutableStateOf<String?>(null) }
         // true mientras se envía el pedido: el botón atrás no hace nada.
         var enviandoPedido by remember { mutableStateOf(false) }
         val carrito = remember { Dependencias.carrito() }
@@ -202,6 +204,7 @@ fun App(
                         val creado = estadoDatos.pedidoCreado
                         if (creado != null) {
                             pedidoConfirmado = creado
+                            avisoPagoInicial = estadoDatos.avisoPago
                             pedidoConfirmadoId = creado.id
                             pedidosEnviados++
                             pantalla = Pantalla.Confirmado
@@ -252,8 +255,11 @@ fun App(
                         val modelo = viewModel<PedidoConfirmadoViewModel>(key = "pedido-$id") {
                             PedidoConfirmadoViewModel(
                                 repositorio = Dependencias.repositorioPedidos(),
+                                repositorioPagos = Dependencias.repositorioPagos(),
+                                abridor = Dependencias.abridorUrl(),
                                 pedidoId = id,
                                 pedidoInicial = pedidoConfirmado?.takeIf { it.id == id },
+                                errorPagoInicial = avisoPagoInicial,
                             )
                         }
                         // Bucle cancelable: se detiene al salir de la pantalla o
@@ -265,6 +271,8 @@ fun App(
                         PantallaPedidoConfirmado(
                             estado = modelo.estado,
                             alActualizar = { alcance.launch { modelo.actualizar() } },
+                            alPagarConTarjeta = { alcance.launch { modelo.pagarConTarjeta() } },
+                            alComprobarPago = { alcance.launch { modelo.comprobarPago() } },
                             alVolverAlInicio = { pantalla = Pantalla.Inicio },
                             modifier = modificador,
                         )

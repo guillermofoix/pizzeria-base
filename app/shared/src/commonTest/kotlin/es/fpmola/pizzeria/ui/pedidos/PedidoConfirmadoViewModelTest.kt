@@ -1,9 +1,12 @@
 package es.fpmola.pizzeria.ui.pedidos
 
 import es.fpmola.pizzeria.modelo.Importe
+import es.fpmola.pizzeria.pagos.AbridorUrl
+import es.fpmola.pizzeria.pagos.RepositorioPagos
 import es.fpmola.pizzeria.pedidos.EstadoPedido
 import es.fpmola.pizzeria.pedidos.Pedido
 import es.fpmola.pizzeria.pedidos.RepositorioPedidos
+import es.fpmola.pizzeria.prueba.AbridorFalso
 import es.fpmola.pizzeria.prueba.AjustesEnMemoria
 import es.fpmola.pizzeria.prueba.crearClientePrueba
 import es.fpmola.pizzeria.prueba.jsonPedido
@@ -20,12 +23,20 @@ import kotlinx.coroutines.test.runTest
 
 class PedidoConfirmadoViewModelTest {
 
-    private fun crearViewModel(motor: MockEngine, pedidoInicial: Pedido? = null) =
-        PedidoConfirmadoViewModel(
-            repositorio = RepositorioPedidos(crearClientePrueba(AjustesEnMemoria(), motor)),
+    private fun crearViewModel(
+        motor: MockEngine,
+        pedidoInicial: Pedido? = null,
+        abridor: AbridorUrl = AbridorFalso(),
+    ): PedidoConfirmadoViewModel {
+        val cliente = crearClientePrueba(AjustesEnMemoria(), motor)
+        return PedidoConfirmadoViewModel(
+            repositorio = RepositorioPedidos(cliente),
+            repositorioPagos = RepositorioPagos(cliente),
+            abridor = abridor,
             pedidoId = 104,
             pedidoInicial = pedidoInicial,
         )
+    }
 
     /** Motor que responde con un estado distinto en cada consulta, por orden. */
     private class EstadosEnSecuencia(private val estados: List<String>) {
