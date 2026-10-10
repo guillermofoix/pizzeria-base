@@ -17,6 +17,7 @@ import es.fpmola.pizzeria.di.Dependencias
 import es.fpmola.pizzeria.ui.AvisoDemo
 import es.fpmola.pizzeria.ui.catalogo.CatalogoViewModel
 import es.fpmola.pizzeria.ui.catalogo.PantallaCatalogo
+import es.fpmola.pizzeria.ui.carrito.PantallaCarrito
 import es.fpmola.pizzeria.ui.catalogo.PantallaDetalle
 import es.fpmola.pizzeria.ui.configuracion.ConfiguracionViewModel
 import es.fpmola.pizzeria.ui.configuracion.PantallaConfiguracion
@@ -24,7 +25,7 @@ import es.fpmola.pizzeria.ui.inicio.PantallaInicio
 import es.fpmola.pizzeria.ui.tema.TemaPizzeria
 
 /** Pantallas de la app. La navegación es un simple estado, sin librería. */
-private enum class Pantalla { Configuracion, Inicio, Catalogo, Detalle }
+private enum class Pantalla { Configuracion, Inicio, Catalogo, Detalle, Carrito }
 
 /**
  * Raíz de la app: tema de la pizzería, aviso de demo siempre visible y
@@ -45,11 +46,20 @@ fun App(
         // de un servidor anterior no se reutiliza.
         var versionServidor by rememberSaveable { mutableStateOf(0) }
         var intentoCatalogo by rememberSaveable { mutableStateOf(0) }
+        // Pantalla desde la que se abrió el carrito (catálogo o detalle), para volver a ella.
+        var origenCarrito by rememberSaveable { mutableStateOf(Pantalla.Catalogo) }
         val carrito = remember { Dependencias.carrito() }
 
-        // Atrás: del detalle al catálogo y del catálogo al inicio.
-        manejadorAtras(pantalla == Pantalla.Detalle || pantalla == Pantalla.Catalogo) {
-            pantalla = if (pantalla == Pantalla.Detalle) Pantalla.Catalogo else Pantalla.Inicio
+        // Atrás: del detalle al catálogo, del catálogo al inicio y del carrito
+        // a la pantalla desde la que se abrió.
+        manejadorAtras(
+            pantalla == Pantalla.Detalle || pantalla == Pantalla.Catalogo || pantalla == Pantalla.Carrito,
+        ) {
+            pantalla = when (pantalla) {
+                Pantalla.Detalle -> Pantalla.Catalogo
+                Pantalla.Carrito -> origenCarrito
+                else -> Pantalla.Inicio
+            }
         }
 
         Scaffold(bottomBar = { AvisoDemo() }) { relleno ->
@@ -98,8 +108,10 @@ fun App(
                             pantalla = Pantalla.Detalle
                         },
                         unidadesCarrito = carrito.totalUnidades,
-                        // La pantalla del carrito se conecta en un commit posterior.
-                        alAbrirCarrito = { },
+                        alAbrirCarrito = {
+                            origenCarrito = Pantalla.Catalogo
+                            pantalla = Pantalla.Carrito
+                        },
                         alVolver = { pantalla = Pantalla.Inicio },
                         modifier = modificador,
                     )
@@ -118,9 +130,30 @@ fun App(
                                 ResultadoAnadir.NoDisponible
                             }
                         },
-                        // La pantalla del carrito se conecta en un commit posterior.
-                        alAbrirCarrito = { },
+                        alAbrirCarrito = {
+                            origenCarrito = Pantalla.Detalle
+                            pantalla = Pantalla.Carrito
+                        },
                         alVolver = { pantalla = Pantalla.Catalogo },
+                        modifier = modificador,
+                    )
+                }
+                Pantalla.Carrito -> {
+                    // Se obtiene el modelo del catálogo para que la carta esté
+                    // cargada y el carrito se ajuste a ella.
+                    catalogoViewModel(versionServidor, intentoCatalogo)
+                    PantallaCarrito(
+                        lineas = carrito.lineas,
+                        total = carrito.total,
+                        avisoQuitadas = carrito.quitadasPorCarta,
+                        alCambiarCantidad = carrito::cambiarCantidad,
+                        alQuitar = carrito::quitar,
+                        alVaciar = carrito::vaciar,
+                        alDescartarAviso = carrito::descartarAviso,
+                        // La pantalla de datos del pedido se conecta en un commit posterior.
+                        alContinuar = { },
+                        alVolverALaCarta = { pantalla = Pantalla.Catalogo },
+                        alVolver = { pantalla = origenCarrito },
                         modifier = modificador,
                     )
                 }
