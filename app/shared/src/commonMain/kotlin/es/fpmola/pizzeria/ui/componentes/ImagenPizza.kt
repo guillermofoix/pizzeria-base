@@ -52,7 +52,7 @@ internal fun MarcadorImagen(
     cargando: Boolean = false,
 ) {
     Box(
-        modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
+        modifier = modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest),
         contentAlignment = Alignment.Center,
     ) {
         if (cargando) {

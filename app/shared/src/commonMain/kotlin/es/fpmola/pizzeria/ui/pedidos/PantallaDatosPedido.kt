@@ -1,5 +1,6 @@
 package es.fpmola.pizzeria.ui.pedidos
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,12 +14,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +24,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import es.fpmola.pizzeria.modelo.Importe
 import es.fpmola.pizzeria.pedidos.TipoPedido
+import es.fpmola.pizzeria.ui.componentes.BotonTexto
+import es.fpmola.pizzeria.ui.componentes.CampoTextoPizzeria
+import es.fpmola.pizzeria.ui.componentes.ChipPizzeria
+import es.fpmola.pizzeria.ui.componentes.emoji
 
 /**
  * Pantalla de datos del pedido: tipo (mesa, recoger o domicilio) y solo los
@@ -60,13 +62,13 @@ fun PantallaDatosPedido(
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = alVolver, enabled = editable) {
+            BotonTexto(onClick = alVolver, enabled = editable) {
                 Text("‹ Carrito")
             }
             Text(
                 text = "Datos del pedido",
                 style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onBackground,
             )
         }
 
@@ -78,17 +80,21 @@ fun PantallaDatosPedido(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("¿Cómo quieres tu pedido?", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "¿Cómo quieres tu pedido?",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 for (tipo in TipoPedido.entries) {
-                    FilterChip(
-                        selected = datos.tipo == tipo,
-                        onClick = { alCambiarTipo(tipo) },
-                        enabled = editable,
-                        label = { Text(tipo.etiqueta) },
+                    ChipPizzeria(
+                        seleccionado = datos.tipo == tipo,
+                        alPulsar = { alCambiarTipo(tipo) },
+                        habilitado = editable,
+                        etiqueta = { Text("${tipo.emoji} ${tipo.etiqueta}") },
                     )
                 }
             }
@@ -96,72 +102,72 @@ fun PantallaDatosPedido(
             // Solo se muestran los campos que exige el tipo elegido.
             when (datos.tipo) {
                 TipoPedido.Mesa -> {
-                    CampoTexto(
+                    CampoTextoPizzeria(
                         valor = datos.mesa,
                         alCambiar = alCambiarMesa,
                         etiqueta = "Número de mesa",
                         error = errores.mesa,
-                        editable = editable,
-                        teclado = KeyboardType.Number,
+                        habilitado = editable,
+                        opcionesTeclado = KeyboardOptions(keyboardType = KeyboardType.Number),
                     )
-                    CampoTexto(
+                    CampoTextoPizzeria(
                         valor = datos.nombre,
                         alCambiar = alCambiarNombre,
                         etiqueta = "Nombre (opcional)",
                         error = errores.nombre,
-                        editable = editable,
+                        habilitado = editable,
                     )
                 }
                 TipoPedido.Recoger -> {
-                    CampoTexto(
+                    CampoTextoPizzeria(
                         valor = datos.nombre,
                         alCambiar = alCambiarNombre,
                         etiqueta = "Nombre",
                         error = errores.nombre,
-                        editable = editable,
+                        habilitado = editable,
                     )
-                    CampoTexto(
+                    CampoTextoPizzeria(
                         valor = datos.telefono,
                         alCambiar = alCambiarTelefono,
                         etiqueta = "Teléfono",
                         error = errores.telefono,
-                        editable = editable,
-                        teclado = KeyboardType.Phone,
+                        habilitado = editable,
+                        opcionesTeclado = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     )
                 }
                 TipoPedido.Domicilio -> {
-                    CampoTexto(
+                    CampoTextoPizzeria(
                         valor = datos.nombre,
                         alCambiar = alCambiarNombre,
                         etiqueta = "Nombre",
                         error = errores.nombre,
-                        editable = editable,
+                        habilitado = editable,
                     )
-                    CampoTexto(
+                    CampoTextoPizzeria(
                         valor = datos.telefono,
                         alCambiar = alCambiarTelefono,
                         etiqueta = "Teléfono",
                         error = errores.telefono,
-                        editable = editable,
-                        teclado = KeyboardType.Phone,
+                        habilitado = editable,
+                        opcionesTeclado = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     )
-                    CampoTexto(
+                    CampoTextoPizzeria(
                         valor = datos.direccion,
                         alCambiar = alCambiarDireccion,
                         etiqueta = "Dirección de entrega",
                         error = errores.direccion,
-                        editable = editable,
+                        habilitado = editable,
                         unaLinea = false,
                     )
                 }
             }
 
-            CampoTexto(
+            CampoTextoPizzeria(
                 valor = datos.observaciones,
                 alCambiar = alCambiarObservaciones,
                 etiqueta = "Observaciones (opcional)",
                 error = null,
-                editable = editable,
+                habilitado = editable,
                 unaLinea = false,
             )
         }
@@ -170,17 +176,20 @@ fun PantallaDatosPedido(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainer)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 text = datos.tipo.descripcionPago + " El pago con tarjeta llegará más adelante.",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 text = "$unidades ${if (unidades == 1) "unidad" else "unidades"} · " +
                     "Total estimado ${total.formatear()}",
                 style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.secondary,
             )
             if (estado.mensajeError != null) {
                 Text(
@@ -201,33 +210,9 @@ fun PantallaDatosPedido(
                     )
                     Text(text = "Enviando…", modifier = Modifier.padding(start = 12.dp))
                 } else {
-                    Text(if (estado.envioIncierto) "Volver a enviar el pedido" else "Enviar pedido")
+                    Text(if (estado.envioIncierto) "Volver a enviar el pedido" else "🚀 Enviar pedido")
                 }
             }
         }
     }
-}
-
-/** Campo de texto con el error de validación debajo, si lo hay. */
-@Composable
-private fun CampoTexto(
-    valor: String,
-    alCambiar: (String) -> Unit,
-    etiqueta: String,
-    error: String?,
-    editable: Boolean,
-    teclado: KeyboardType = KeyboardType.Text,
-    unaLinea: Boolean = true,
-) {
-    OutlinedTextField(
-        value = valor,
-        onValueChange = alCambiar,
-        label = { Text(etiqueta) },
-        isError = error != null,
-        supportingText = error?.let { mensaje -> { Text(mensaje) } },
-        singleLine = unaLinea,
-        enabled = editable,
-        keyboardOptions = KeyboardOptions(keyboardType = teclado),
-        modifier = Modifier.fillMaxWidth(),
-    )
 }

@@ -13,14 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,7 +28,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import es.fpmola.pizzeria.catalogo.Pizza
 import es.fpmola.pizzeria.ui.componentes.BotonCarrito
+import es.fpmola.pizzeria.ui.componentes.BotonTexto
+import es.fpmola.pizzeria.ui.componentes.ChipPizzeria
 import es.fpmola.pizzeria.ui.componentes.ImagenPizza
+import es.fpmola.pizzeria.ui.componentes.TarjetaPizzeria
 
 /**
  * Pantalla del catálogo: selector de categorías y lista de pizzas.
@@ -58,13 +57,13 @@ fun PantallaCatalogo(
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = alVolver) {
+            BotonTexto(onClick = alVolver) {
                 Text("‹ Inicio")
             }
             Text(
                 text = "Nuestra carta",
                 style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onBackground,
             )
             Spacer(modifier = Modifier.weight(1f))
             BotonCarrito(unidades = unidadesCarrito, alAbrir = alAbrirCarrito)
@@ -100,7 +99,11 @@ private fun VistaCargando(modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             CircularProgressIndicator()
-            Text("Cargando la carta…", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = "Cargando la carta…",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -144,17 +147,17 @@ private fun SelectorCategorias(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item(key = "todas") {
-            FilterChip(
-                selected = estado.categoriaSeleccionadaId == null,
-                onClick = { alSeleccionarCategoria(null) },
-                label = { Text("Todas") },
+            ChipPizzeria(
+                seleccionado = estado.categoriaSeleccionadaId == null,
+                alPulsar = { alSeleccionarCategoria(null) },
+                etiqueta = { Text("🔥 Todas") },
             )
         }
         items(estado.categorias, key = { it.id }) { categoria ->
-            FilterChip(
-                selected = estado.categoriaSeleccionadaId == categoria.id,
-                onClick = { alSeleccionarCategoria(categoria.id) },
-                label = {
+            ChipPizzeria(
+                seleccionado = estado.categoriaSeleccionadaId == categoria.id,
+                alPulsar = { alSeleccionarCategoria(categoria.id) },
+                etiqueta = {
                     Text(listOfNotNull(categoria.icono, categoria.nombre).joinToString(" "))
                 },
             )
@@ -183,6 +186,7 @@ private fun ListaPizzas(
                     "No hay pizzas en esta categoría."
                 },
                 style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
         }
@@ -193,20 +197,20 @@ private fun ListaPizzas(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(pizzas, key = { it.id }) { pizza ->
-                TarjetaPizza(pizza = pizza, alPulsar = { alAbrirPizza(pizza) })
+                TarjetaDePizza(pizza = pizza, alPulsar = { alAbrirPizza(pizza) })
             }
         }
     }
 }
 
 @Composable
-private fun TarjetaPizza(
+private fun TarjetaDePizza(
     pizza: Pizza,
     alPulsar: () -> Unit,
 ) {
     val agotada = !pizza.disponible
-    Card(
-        onClick = alPulsar,
+    TarjetaPizzeria(
+        alPulsar = alPulsar,
         modifier = Modifier
             .fillMaxWidth()
             .alpha(if (agotada) 0.55f else 1f),
@@ -220,7 +224,7 @@ private fun TarjetaPizza(
                 descripcion = pizza.nombre,
                 modifier = Modifier
                     .size(88.dp)
-                    .clip(RoundedCornerShape(12.dp)),
+                    .clip(MaterialTheme.shapes.small),
             )
             Column(
                 modifier = Modifier.weight(1f),
@@ -229,6 +233,7 @@ private fun TarjetaPizza(
                 Text(
                     text = pizza.nombre,
                     style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -236,6 +241,7 @@ private fun TarjetaPizza(
                     Text(
                         text = pizza.descripcion,
                         style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -247,8 +253,8 @@ private fun TarjetaPizza(
                     Text(
                         text = pizza.precio.formatear(),
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     if (agotada) {
                         Text(

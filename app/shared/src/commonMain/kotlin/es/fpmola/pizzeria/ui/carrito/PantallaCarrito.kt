@@ -1,5 +1,6 @@
 package es.fpmola.pizzeria.ui.carrito
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,15 +13,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,8 +29,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import es.fpmola.pizzeria.carrito.LineaCarrito
 import es.fpmola.pizzeria.modelo.Importe
+import es.fpmola.pizzeria.ui.componentes.BotonContorno
+import es.fpmola.pizzeria.ui.componentes.BotonTexto
 import es.fpmola.pizzeria.ui.componentes.ImagenPizza
 import es.fpmola.pizzeria.ui.componentes.SelectorCantidad
+import es.fpmola.pizzeria.ui.componentes.TarjetaPizzeria
 
 /**
  * Pantalla del carrito: líneas con imagen, nombre, cantidad editable y
@@ -63,13 +64,13 @@ fun PantallaCarrito(
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = alVolver) {
+            BotonTexto(onClick = alVolver) {
                 Text("‹ Volver")
             }
             Text(
-                text = "Tu carrito",
+                text = "🛒 Tu carrito",
                 style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onBackground,
             )
         }
 
@@ -127,7 +128,7 @@ private fun AvisoQuitadas(
                     nombres.joinToString(", ") + ".",
                 style = MaterialTheme.typography.bodyMedium,
             )
-            TextButton(onClick = alDescartar) {
+            BotonTexto(onClick = alDescartar) {
                 Text("Entendido")
             }
         }
@@ -152,6 +153,7 @@ private fun CarritoVacio(
             Text(
                 text = "Tu carrito está vacío.",
                 style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
             Button(onClick = alVolverALaCarta) {
@@ -167,7 +169,7 @@ private fun FilaCarrito(
     alCambiarCantidad: (Int) -> Unit,
     alQuitar: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    TarjetaPizzeria(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -181,18 +183,20 @@ private fun FilaCarrito(
                     descripcion = linea.nombre,
                     modifier = Modifier
                         .size(64.dp)
-                        .clip(RoundedCornerShape(12.dp)),
+                        .clip(MaterialTheme.shapes.small),
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = linea.nombre,
                         style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = "${linea.precioUnitario.formatear()} por unidad",
                         style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -209,9 +213,9 @@ private fun FilaCarrito(
                     text = linea.subtotal.formatear(),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.secondary,
                 )
-                TextButton(onClick = alQuitar) {
+                BotonTexto(onClick = alQuitar) {
                     Text("Quitar")
                 }
             }
@@ -229,6 +233,7 @@ private fun ResumenCarrito(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -239,24 +244,26 @@ private fun ResumenCarrito(
             Text(
                 text = "Total estimado",
                 style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
             Text(
                 text = total.formatear(),
                 style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.secondary,
             )
         }
         Text(
             text = "El importe definitivo lo calcula el restaurante al recibir el pedido.",
             style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            OutlinedButton(onClick = alVaciar) {
+            BotonContorno(onClick = alVaciar) {
                 Text("Vaciar carrito")
             }
             Button(
