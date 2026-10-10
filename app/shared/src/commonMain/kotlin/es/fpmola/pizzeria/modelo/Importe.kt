@@ -23,6 +23,12 @@ data class Importe(val centimos: Long) : Comparable<Importe> {
 
     override fun compareTo(other: Importe): Int = centimos.compareTo(other.centimos)
 
+    /** Suma de dos importes (en céntimos, sin decimales). */
+    operator fun plus(otro: Importe): Importe = Importe(centimos + otro.centimos)
+
+    /** Importe multiplicado por un número de unidades. */
+    operator fun times(unidades: Int): Importe = Importe(centimos * unidades)
+
     /** Formato para el usuario: "12,50 €". */
     fun formatear(): String = "${textoConSeparador(',')} €"
 

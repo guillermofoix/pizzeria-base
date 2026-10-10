@@ -6,7 +6,11 @@ import io.ktor.client.call.body
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
+import io.ktor.http.ContentType
+import io.ktor.http.content.TextContent
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlin.coroutines.cancellation.CancellationException
@@ -50,6 +54,30 @@ class ClienteApi(
         val base = urlBase ?: ajustes.obtenerUrlBase() ?: throw ErrorRed.SinServidorConfigurado()
         return try {
             http.get(base + ruta)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw ErrorRed.SinConexion(e)
+        }
+    }
+
+    /**
+     * Hace un POST a [ruta] con un cuerpo JSON ya serializado y devuelve la
+     * respuesta sin comprobar el código HTTP.
+     *
+     * No reintenta nunca: un POST puede crear algo en el servidor, así que
+     * repetirlo podría duplicarlo. Quien llama decide qué hacer ante un fallo.
+     *
+     * @throws ErrorRed.SinServidorConfigurado si no hay URL guardada.
+     * @throws ErrorRed.SinConexion si la petición no llega a completarse (en
+     * ese caso no se sabe si el servidor llegó a recibirla).
+     */
+    suspend fun peticionPostJson(ruta: String, cuerpoJson: String): HttpResponse {
+        val base = ajustes.obtenerUrlBase() ?: throw ErrorRed.SinServidorConfigurado()
+        return try {
+            http.post(base + ruta) {
+                setBody(TextContent(cuerpoJson, ContentType.Application.Json))
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
