@@ -933,6 +933,16 @@ function renderKDSBoard() {
     pedidosFiltrados = pedidosFiltrados.filter(p => p.tipo_pedido === state.kdsFilter);
   }
 
+  // Filtro KDS (siempre activo): la cocina no ve los pedidos con tarjeta que aún no se han pagado.
+  // - Se exige stripe_session_id para no ocultar para siempre los pedidos en los que Stripe falló
+  //   y quedaron para cobrar en caja (nunca llegaron a tener sesión de pago).
+  // - Se exige estado 'pendiente' para que no desaparezca un pedido que ya está en preparación
+  //   (por ejemplo, si en caja se genera un QR de Stripe sobre un pedido en curso).
+  // Las columnas, el contador de cocina y los indicadores de carga salen de esta misma lista.
+  pedidosFiltrados = pedidosFiltrados.filter(p =>
+    !(p.estado === 'pendiente' && p.metodo_pago === 'stripe' && p.stripe_session_id && p.estado_pago !== 'pagado')
+  );
+
   // Filtro KDS: Los pedidos finalizados y cobrados desaparecen automáticamente del tablero de los cocineros
   if (state.kdsOcultarCobrados) {
     pedidosFiltrados = pedidosFiltrados.filter(p => {
