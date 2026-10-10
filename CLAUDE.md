@@ -56,6 +56,7 @@ expresamente:
 - Importes: tipo `Importe` (céntimos en `Long`), sin `Double` ni `BigDecimal`.
   Acepta el número o el texto que envía la API (`"12.50"` o `12.5`).
 - `GET /api/health` no usa el envoltorio `{success, data}`: tiene su propia clase.
+- `crear-sesion` no usa el envoltorio `{success,data}` y devuelve `url` y `sessionId`.
 - El seguimiento del pedido se hace consultando `GET /api/pedidos/{id}`
   (`estado` y `estado_pago`); no existe `/api/pedidos/{id}/estado` con GET.
 - No hay JDK ni Android SDK en este equipo: no ejecutes gradlew. Solo el CI de
