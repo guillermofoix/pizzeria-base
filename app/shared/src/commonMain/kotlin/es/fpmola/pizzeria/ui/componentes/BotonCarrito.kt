@@ -36,17 +36,19 @@ fun BotonCarrito(
         "Abrir el carrito, $unidades unidades"
     }
     Surface(
-        modifier = modifier
-            .clip(CircleShape)
-            .clickable(role = Role.Button, onClick = alAbrir)
-            .semantics { contentDescription = descripcion },
+        modifier = modifier.semantics { contentDescription = descripcion },
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceContainer,
         contentColor = MaterialTheme.colorScheme.onSurface,
+        shadowElevation = 6.dp,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
+        // El recorte y el clic van dentro de la superficie para no recortar su sombra.
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier
+                .clip(CircleShape)
+                .clickable(role = Role.Button, onClick = alAbrir)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {

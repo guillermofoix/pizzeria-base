@@ -193,7 +193,8 @@ val MaterialTheme.coloresPizzeria: ColoresPizzeria
     get() = LocalColoresPizzeria.current
 
 /**
- * Tema Material 3 de la pizzería. Sigue el modo claro u oscuro del sistema.
+ * Tema Material 3 de la pizzería: colores de la web (claro y oscuro según el
+ * sistema), tipografía de [TipografiaPizzeria] y radios de [FormasPizzeria].
  */
 @Composable
 fun TemaPizzeria(
@@ -205,6 +206,8 @@ fun TemaPizzeria(
     ) {
         MaterialTheme(
             colorScheme = if (oscuro) ColoresOscuros else ColoresClaros,
+            typography = TipografiaPizzeria,
+            shapes = FormasPizzeria,
             content = contenido,
         )
     }
