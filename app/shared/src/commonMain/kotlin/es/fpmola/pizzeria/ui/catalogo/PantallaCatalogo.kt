@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import es.fpmola.pizzeria.catalogo.Pizza
+import es.fpmola.pizzeria.ui.componentes.BotonCarrito
 import es.fpmola.pizzeria.ui.componentes.ImagenPizza
 
 /**
@@ -44,6 +46,8 @@ fun PantallaCatalogo(
     alSeleccionarCategoria: (Int?) -> Unit,
     alReintentar: () -> Unit,
     alAbrirPizza: (Pizza) -> Unit,
+    unidadesCarrito: Int,
+    alAbrirCarrito: () -> Unit,
     alVolver: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -62,6 +66,8 @@ fun PantallaCatalogo(
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.primary,
             )
+            Spacer(modifier = Modifier.weight(1f))
+            BotonCarrito(unidades = unidadesCarrito, alAbrir = alAbrirCarrito)
         }
 
         when {

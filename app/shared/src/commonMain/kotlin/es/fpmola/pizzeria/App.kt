@@ -12,6 +12,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import es.fpmola.pizzeria.carrito.ResultadoAnadir
 import es.fpmola.pizzeria.di.Dependencias
 import es.fpmola.pizzeria.ui.AvisoDemo
 import es.fpmola.pizzeria.ui.catalogo.CatalogoViewModel
@@ -44,6 +45,7 @@ fun App(
         // de un servidor anterior no se reutiliza.
         var versionServidor by rememberSaveable { mutableStateOf(0) }
         var intentoCatalogo by rememberSaveable { mutableStateOf(0) }
+        val carrito = remember { Dependencias.carrito() }
 
         // Atrás: del detalle al catálogo y del catálogo al inicio.
         manejadorAtras(pantalla == Pantalla.Detalle || pantalla == Pantalla.Catalogo) {
@@ -95,15 +97,29 @@ fun App(
                             pizzaSeleccionadaId = pizza.id
                             pantalla = Pantalla.Detalle
                         },
+                        unidadesCarrito = carrito.totalUnidades,
+                        // La pantalla del carrito se conecta en un commit posterior.
+                        alAbrirCarrito = { },
                         alVolver = { pantalla = Pantalla.Inicio },
                         modifier = modificador,
                     )
                 }
                 Pantalla.Detalle -> {
                     val modelo = catalogoViewModel(versionServidor, intentoCatalogo)
+                    val pizza = modelo.estado.pizzas.firstOrNull { it.id == pizzaSeleccionadaId }
                     PantallaDetalle(
-                        pizza = modelo.estado.pizzas.firstOrNull { it.id == pizzaSeleccionadaId },
+                        pizza = pizza,
                         cargando = modelo.estado.enCarga,
+                        unidadesCarrito = carrito.totalUnidades,
+                        alAnadirAlCarrito = { cantidad ->
+                            if (pizza != null) {
+                                carrito.anadir(pizza, cantidad)
+                            } else {
+                                ResultadoAnadir.NoDisponible
+                            }
+                        },
+                        // La pantalla del carrito se conecta en un commit posterior.
+                        alAbrirCarrito = { },
                         alVolver = { pantalla = Pantalla.Catalogo },
                         modifier = modificador,
                     )
@@ -126,6 +142,12 @@ private fun catalogoViewModel(versionServidor: Int, intento: Int): CatalogoViewM
     }
     LaunchedEffect(modelo, intento) {
         modelo.cargarSiHaceFalta()
+    }
+    // Cada vez que llega una carta nueva, el carrito se ajusta a ella: así no
+    // se envían ids de pizzas que ya no existen o están agotadas.
+    val carrito = remember { Dependencias.carrito() }
+    LaunchedEffect(modelo.estado.pizzas) {
+        if (modelo.estado.cargada) carrito.sincronizarConCarta(modelo.estado.pizzas)
     }
     return modelo
 }

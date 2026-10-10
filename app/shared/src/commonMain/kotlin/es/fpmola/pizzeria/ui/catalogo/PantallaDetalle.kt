@@ -4,17 +4,24 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -22,20 +29,30 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import es.fpmola.pizzeria.carrito.Carrito
+import es.fpmola.pizzeria.carrito.ResultadoAnadir
 import es.fpmola.pizzeria.catalogo.Pizza
+import es.fpmola.pizzeria.ui.componentes.BotonCarrito
 import es.fpmola.pizzeria.ui.componentes.ImagenPizza
+import es.fpmola.pizzeria.ui.componentes.SelectorCantidad
 
 /**
  * Detalle de una pizza: imagen grande, descripción, precio y, solo si existen,
- * ingredientes y alérgenos.
+ * ingredientes y alérgenos. Permite elegir la cantidad y añadirla al carrito
+ * (las pizzas agotadas no se pueden añadir).
  *
  * @param pizza la pizza a mostrar; null si todavía no está disponible.
  * @param cargando true mientras se carga la carta (la pizza puede llegar después).
+ * @param unidadesCarrito unidades que hay en el carrito (para el indicador).
+ * @param alAnadirAlCarrito añade las unidades elegidas y devuelve el resultado.
  */
 @Composable
 fun PantallaDetalle(
     pizza: Pizza?,
     cargando: Boolean,
+    unidadesCarrito: Int,
+    alAnadirAlCarrito: (Int) -> ResultadoAnadir,
+    alAbrirCarrito: () -> Unit,
     alVolver: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -49,10 +66,15 @@ fun PantallaDetalle(
             TextButton(onClick = alVolver) {
                 Text("‹ Volver")
             }
+            Spacer(modifier = Modifier.weight(1f))
+            BotonCarrito(unidades = unidadesCarrito, alAbrir = alAbrirCarrito)
         }
 
         when {
-            pizza != null -> ContenidoDetalle(pizza = pizza, modifier = Modifier.weight(1f))
+            pizza != null -> {
+                ContenidoDetalle(pizza = pizza, modifier = Modifier.weight(1f))
+                BarraAnadirAlCarrito(pizza = pizza, alAnadir = alAnadirAlCarrito)
+            }
             cargando -> Box(
                 modifier = Modifier
                     .weight(1f)
@@ -73,6 +95,73 @@ fun PantallaDetalle(
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Selector de cantidad y botón "Añadir al carrito", fijos en la parte
+ * inferior. Con la pizza agotada el botón queda desactivado.
+ */
+@Composable
+private fun BarraAnadirAlCarrito(
+    pizza: Pizza,
+    alAnadir: (Int) -> ResultadoAnadir,
+) {
+    var cantidad by remember(pizza.id) { mutableStateOf(Carrito.CANTIDAD_MINIMA) }
+    var aviso by remember(pizza.id) { mutableStateOf<String?>(null) }
+
+    HorizontalDivider()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val mensaje = if (!pizza.disponible) {
+            "Esta pizza está agotada y no se puede añadir al carrito."
+        } else {
+            aviso
+        }
+        if (mensaje != null) {
+            Text(
+                text = mensaje,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (pizza.disponible) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            SelectorCantidad(
+                cantidad = cantidad,
+                alCambiar = {
+                    cantidad = it
+                    aviso = null
+                },
+                habilitado = pizza.disponible,
+            )
+            Button(
+                onClick = {
+                    aviso = when (alAnadir(cantidad)) {
+                        ResultadoAnadir.Anadida -> "Añadido al carrito."
+                        ResultadoAnadir.LimiteAlcanzado ->
+                            "Máximo ${Carrito.CANTIDAD_MAXIMA} unidades por pizza: se han añadido las que cabían."
+                        ResultadoAnadir.NoDisponible -> "Esta pizza está agotada."
+                    }
+                    cantidad = Carrito.CANTIDAD_MINIMA
+                },
+                enabled = pizza.disponible,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Añadir al carrito")
             }
         }
     }
