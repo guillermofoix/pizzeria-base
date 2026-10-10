@@ -1,0 +1,1597 @@
+openapi: 3.0.3
+# ==============================================================================
+# API REAL DEL BACKEND DE LA PIZZERÍA (backend/src)
+# ==============================================================================
+# Este documento describe la API tal como está implementada hoy, no la API
+# deseada. Las extensiones `x-nota` señalan comportamientos problemáticos que
+# NO se han corregido (ver también docs/AUDITORIA.md).
+# Verificado contra el código del commit f2f00d0.
+# ==============================================================================
+info:
+  title: API Pizzería Bella Napoli (implementación actual)
+  version: 1.0.0
+  description: |
+    API REST del backend Node.js + Express (`backend/src/server.js`).
+
+    **Convenciones reales de la API**
+    - Campos en `snake_case`.
+    - Respuestas envueltas en `{ success, data, message?, count? }`.
+      Excepciones: `/api/health`, `/`, `/api/pagos/crear-sesion`,
+      `/api/pagos/confirmar-sesion`, `/api/pagos/config` y el webhook.
+    - Errores: `{ success: false, message, error? }`, donde `error` contiene el
+      mensaje interno de PostgreSQL o de Stripe.
+    - Importes en **euros**. Las columnas `NUMERIC` salen como **texto**
+      (`"9.50"`); algunos importes calculados salen como número (ver cada esquema).
+    - Fechas `TIMESTAMP` sin zona horaria, serializadas como ISO 8601 con `Z`
+      según la zona horaria del proceso Node.
+    - **No hay autenticación**: ningún endpoint pide token ni credenciales.
+
+    **Flujo de una app móvil de clientes**
+    1. `GET /api/health`: comprobar que el servidor y la base de datos responden.
+    2. `GET /api/pizzas?disponible=true`: carta con categoría, ingredientes,
+       alérgenos e `imagen_url` (URL absoluta externa).
+       Opcional: `GET /api/pizzas/metadata` para las categorías e ingredientes.
+    3. `POST /api/pedidos`: crear el pedido (el servidor recalcula los precios).
+    4. Si paga con tarjeta online: `POST /api/pagos/crear-sesion` → abrir `url`
+       de Stripe. Al volver, Stripe redirige a la web (no a la app) con
+       `?pago=exito|cancelado&pedido_id=…`.
+    5. `POST /api/pagos/confirmar-sesion` (opcional) para reconciliar el pago.
+    6. `GET /api/pedidos/{id}`: consultar periódicamente `estado` y `estado_pago`.
+  x-nota: |
+    Ningún endpoint está protegido. Cualquiera puede leer los datos personales
+    de todos los pedidos, modificar la carta, cambiar estados y marcar pedidos
+    como cobrados. No existen /api/auth/* ni JWT.
+
+servers:
+  - url: http://localhost:3000
+    description: Backend directo (docker-compose.yml publica el puerto 3000).
+  - url: http://localhost:8080
+    description: A través de Nginx de frontend-web en docker-compose.yml (proxy de /api/).
+  - url: https://{dominio}
+    description: Producción, Cloudflare Tunnel + Nginx (proxy de /api/ al backend).
+    variables:
+      dominio:
+        default: dam-XX.guillermofoix.org
+        description: Subdominio del túnel de cada alumno (ver P07).
+
+tags:
+  - name: Salud
+    description: Comprobación del servidor.
+  - name: Pizzas
+    description: Carta, categorías, ingredientes y alérgenos.
+  - name: Pedidos
+    description: Creación y seguimiento de pedidos (mesa, domicilio, recoger).
+  - name: Mesas
+    description: Plano de sala (uso del personal y de la app QR).
+  - name: Pagos
+    description: Integración con Stripe Checkout.
+
+paths:
+  # ----------------------------------------------------------------------------
+  # SALUD
+  # ----------------------------------------------------------------------------
+  /:
+    get:
+      tags: [Salud]
+      summary: Información de la API
+      operationId: obtenerInfoApi
+      description: |
+        Solo accesible llamando directamente al backend (puerto 3000). A través de
+        Nginx, `/` sirve la web de frontend-web, no este JSON.
+      responses:
+        '200':
+          description: Información básica y lista de recursos.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  endpoints:
+                    type: object
+                    additionalProperties: { type: string }
+                  documentation: { type: string }
+              example:
+                message: '🍕 ¡Bienvenido a la API REST de la Pizzería Full-Stack (DAW & DAM)!'
+                endpoints:
+                  health: /api/health
+                  pizzas: /api/pizzas
+                  pedidos: /api/pedidos
+                  mesas: /api/mesas
+                  pagos: /api/pagos
+                documentation: Consulta el archivo README.md para más detalles.
+      x-nota: Remite a un README.md que no existe en el repositorio.
+
+  /api/health:
+    get:
+      tags: [Salud]
+      summary: Estado del servidor y de la base de datos
+      operationId: comprobarSalud
+      description: |
+        Ejecuta `SELECT NOW()` en PostgreSQL. Es el endpoint que debe usar la app
+        móvil para saber si el servidor está operativo. No usa el envoltorio
+        `success`.
+      responses:
+        '200':
+          description: Servidor y base de datos operativos.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Salud' }
+              example:
+                status: UP
+                service: pizzeria-backend
+                timestamp: '2026-10-10T10:15:00.000Z'
+                database:
+                  connected: true
+                  db_time: '2026-10-10T10:15:00.012Z'
+        '500':
+          description: El servidor responde pero la base de datos no.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Salud' }
+              example:
+                status: DEGRADED
+                service: pizzeria-backend
+                timestamp: '2026-10-10T10:15:00.000Z'
+                database:
+                  connected: false
+                  error: Connection terminated due to connection timeout
+      x-nota: |
+        En caso de fallo devuelve el mensaje interno del error de conexión.
+        Si Nginx no puede contactar con el backend la respuesta será un 502 de
+        Nginx en HTML, no este JSON.
+
+  # ----------------------------------------------------------------------------
+  # PIZZAS
+  # ----------------------------------------------------------------------------
+  /api/pizzas/metadata:
+    get:
+      tags: [Pizzas]
+      summary: Categorías e ingredientes (con alérgenos)
+      operationId: obtenerMetadatosCatalogo
+      responses:
+        '200':
+          description: Todas las categorías (por id) y todos los ingredientes (por nombre).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: object
+                    properties:
+                      categorias:
+                        type: array
+                        items: { $ref: '#/components/schemas/Categoria' }
+                      ingredientes:
+                        type: array
+                        items: { $ref: '#/components/schemas/Ingrediente' }
+              example:
+                success: true
+                data:
+                  categorias:
+                    - { id: 1, nombre: Clásicas, icono: '🍕' }
+                    - { id: 2, nombre: Especiales, icono: '⭐' }
+                    - { id: 3, nombre: Gourmet, icono: '👑' }
+                    - { id: 4, nombre: Bebidas y Postres, icono: '🥤' }
+                  ingredientes:
+                    - { id: 7, nombre: Albahaca fresca, alergeno: false }
+                    - { id: 2, nombre: Mozzarella, alergeno: true }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: |
+        Si la base de datos la creó el propio backend (autoinicialización de
+        db.js, caso de RDS) la tabla de ingredientes está vacía; solo
+        database/init.sql siembra ingredientes.
+
+  /api/pizzas:
+    get:
+      tags: [Pizzas]
+      summary: Carta de pizzas
+      operationId: listarPizzas
+      description: |
+        Devuelve las pizzas ordenadas por `id`, con su categoría y sus
+        ingredientes. Para la app de clientes usar `disponible=true`.
+      parameters:
+        - name: disponible
+          in: query
+          required: false
+          description: '`true` filtra disponibles; cualquier otro valor filtra NO disponibles.'
+          schema: { type: string, enum: ['true', 'false'] }
+        - name: categoria_id
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Lista de pizzas.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  count: { type: integer, example: 1 }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Pizza' }
+              example:
+                success: true
+                count: 1
+                data:
+                  - id: 1
+                    nombre: Margherita Clásica
+                    descripcion: 'La auténtica reina de Nápoles: salsa de tomate San Marzano, mozzarella Fior di Latte fresca, hojas de albahaca fresca y aceite de oliva virgen extra.'
+                    precio: '9.50'
+                    imagen_url: https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=800&q=80
+                    disponible: true
+                    categoria_id: 1
+                    categoria_nombre: Clásicas
+                    categoria_icono: '🍕'
+                    ingredientes:
+                      - { id: 1, nombre: Salsa de tomate, alergeno: false }
+                      - { id: 2, nombre: Mozzarella, alergeno: true }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+    post:
+      tags: [Pizzas]
+      summary: Crear una pizza
+      operationId: crearPizza
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PizzaEntrada' }
+            example:
+              nombre: Vegetal
+              descripcion: Pimiento, cebolla, champiñón y aceitunas
+              precio: 10.5
+              categoria_id: 1
+              ingredientes_ids: [1, 2, 9]
+      responses:
+        '201':
+          description: Pizza creada (sin categoría ni ingredientes en la respuesta).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string, example: '¡Pizza creada con éxito en la carta!' }
+                  data: { $ref: '#/components/schemas/PizzaFila' }
+        '400':
+          description: Falta `nombre` o `precio` (un precio 0 también se rechaza).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { success: false, message: El nombre y el precio son campos obligatorios }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: |
+        Sin autenticación. Si no se envía imagen_url se usa una imagen fija de
+        Unsplash; si no se envía categoria_id se usa 1. Una categoría o un
+        ingrediente inexistentes provocan 500.
+
+  /api/pizzas/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPizza'
+    get:
+      tags: [Pizzas]
+      summary: Detalle de una pizza
+      operationId: obtenerPizza
+      responses:
+        '200':
+          description: Pizza con categoría e ingredientes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data: { $ref: '#/components/schemas/Pizza' }
+        '404':
+          description: No existe.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { success: false, message: Pizza con ID 99 no encontrada }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+    put:
+      tags: [Pizzas]
+      summary: Modificar una pizza (actualización parcial)
+      operationId: modificarPizza
+      description: |
+        Solo se cambian los campos enviados. Si se envía `ingredientes_ids`
+        (aunque sea vacío) se reemplazan todos los ingredientes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/PizzaEntrada'
+                - type: object
+                  properties:
+                    disponible: { type: boolean }
+            example: { precio: 10.0, disponible: false }
+      responses:
+        '200':
+          description: Pizza modificada.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string, example: 'Pizza #1 actualizada con éxito' }
+                  data: { $ref: '#/components/schemas/PizzaFila' }
+        '404':
+          description: No existe.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: Sin autenticación ni validación de tipos (los campos requeridos de PizzaEntrada no se exigen aquí).
+    delete:
+      tags: [Pizzas]
+      summary: Eliminar una pizza
+      operationId: eliminarPizza
+      description: |
+        Si la pizza aparece en algún pedido solo se marca `disponible = false`
+        (borrado lógico) y la respuesta no lleva `data`. Si no, se borra.
+      responses:
+        '200':
+          description: Pizza eliminada o desactivada.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string }
+                  data: { $ref: '#/components/schemas/PizzaFila' }
+              examples:
+                borradoLogico:
+                  value:
+                    success: true
+                    message: 'La pizza #2 tiene pedidos históricos asociados, por lo que se ha marcado como no disponible (oculta en carta).'
+                borradoFisico:
+                  value:
+                    success: true
+                    message: 'Pizza #7 eliminada definitivamente de la carta'
+                    data: { id: 7, nombre: Vegetal, descripcion: '', precio: '10.50', imagen_url: 'https://images.unsplash.com/…', categoria_id: 1, disponible: true, creado_en: '2026-10-10T09:00:00.000Z' }
+        '404':
+          description: No existe (solo si no tiene pedidos).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: Sin autenticación.
+
+  # ----------------------------------------------------------------------------
+  # PEDIDOS
+  # ----------------------------------------------------------------------------
+  /api/pedidos:
+    get:
+      tags: [Pedidos]
+      summary: Listar todos los pedidos
+      operationId: listarPedidos
+      description: |
+        Orden: `pendiente`, `en_preparacion`, `en_reparto`, `listo`, resto; y
+        dentro de cada estado por fecha ascendente.
+      parameters:
+        - name: estado
+          in: query
+          schema: { $ref: '#/components/schemas/EstadoPedido' }
+        - name: mesa
+          in: query
+          schema: { type: integer }
+        - name: tipo
+          in: query
+          schema: { $ref: '#/components/schemas/TipoPedido' }
+      responses:
+        '200':
+          description: Lista de pedidos con sus líneas.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  count: { type: integer }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/PedidoDetalle' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: |
+        Devuelve TODOS los pedidos de TODOS los clientes, con nombre, teléfono y
+        dirección, a cualquiera que lo pida. Una app de clientes no debe usarlo.
+    post:
+      tags: [Pedidos]
+      summary: Crear un pedido
+      operationId: crearPedido
+      description: |
+        El servidor busca cada pizza en la base de datos, comprueba que está
+        disponible y calcula `precio_unitario` y `total` con el precio de la
+        carta (ignora cualquier precio enviado). Todo en una transacción.
+
+        **Tipo de pedido** (`tipo_pedido`; CHECK en database/init.sql):
+        `mesa`, `domicilio`, `recoger`. Si no se envía, se usa `tipo_entrega`;
+        si tampoco, `mesa` cuando hay `mesa_numero` y `domicilio` en otro caso.
+
+        **Campos exigidos por tipo**
+        | Tipo | Obligatorios además de `lineas` |
+        | --- | --- |
+        | `mesa` | `mesa_numero` |
+        | `recoger` | `cliente_nombre`, `cliente_telefono` |
+        | `domicilio` | `cliente_nombre`, `cliente_telefono`, `cliente_direccion` |
+
+        El pedido nace con `estado = pendiente` y `estado_pago = pendiente`.
+        Si es de mesa, la mesa pasa a `ocupada`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PedidoEntrada' }
+            examples:
+              domicilio:
+                summary: Pedido a domicilio pagado con Stripe
+                value:
+                  tipo_pedido: domicilio
+                  cliente_nombre: Ana López
+                  cliente_telefono: '600123456'
+                  cliente_direccion: Calle Mayor 1, 2º A
+                  metodo_pago: stripe
+                  observaciones: Llamar al timbre
+                  lineas:
+                    - { pizza_id: 1, cantidad: 2 }
+                    - { pizza_id: 3, cantidad: 1, notas: Sin gorgonzola }
+              recoger:
+                summary: Pedido para recoger
+                value:
+                  tipo_pedido: recoger
+                  cliente_nombre: Pedro
+                  cliente_telefono: '600000003'
+                  metodo_pago: tarjeta_recogida
+                  lineas: [{ pizza_id: 2, cantidad: 1 }]
+              mesa:
+                summary: Pedido desde la mesa (QR)
+                value:
+                  tipo_pedido: mesa
+                  mesa_numero: 4
+                  metodo_pago: pago_mesa
+                  lineas: [{ pizza_id: 6, cantidad: 1 }]
+      responses:
+        '201':
+          description: Pedido creado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string, example: '¡Pedido enviado a cocina con éxito!' }
+                  data: { $ref: '#/components/schemas/PedidoCreado' }
+              example:
+                success: true
+                message: '¡Pedido enviado a cocina con éxito!'
+                data:
+                  id: 104
+                  tipo_pedido: domicilio
+                  mesa_numero: null
+                  fecha: '2026-10-10T10:20:00.000Z'
+                  estado: pendiente
+                  total: '32.50'
+                  cliente_nombre: Ana López
+                  cliente_telefono: '600123456'
+                  cliente_direccion: Calle Mayor 1, 2º A
+                  metodo_pago: stripe
+                  estado_pago: pendiente
+                  stripe_session_id: null
+                  observaciones: Llamar al timbre
+                  lineas:
+                    - { pizza_id: 1, nombre: Margherita Clásica, cantidad: 2, precio_unitario: 9.5, notas: null }
+                    - { pizza_id: 3, nombre: Cuatro Quesos Cremosa, cantidad: 1, precio_unitario: 13.5, notas: Sin gorgonzola }
+        '400':
+          description: |
+            Datos no válidos o error al guardar. Cualquier error (incluidos los de
+            la base de datos) se devuelve como 400 con su mensaje.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                sinLineas:
+                  value: { success: false, message: Debes incluir al menos una pizza en el pedido }
+                sinMesa:
+                  value: { success: false, message: Debes indicar el número de mesa para pedidos en el local }
+                sinDireccion:
+                  value: { success: false, message: La dirección de entrega es obligatoria para pedidos a domicilio }
+                tipoNoValido:
+                  value: { success: false, message: 'Tipo de pedido no válido (opciones: mesa, recoger, domicilio)' }
+                pizzaInexistente:
+                  value: { success: false, message: La pizza con ID 99 no existe. }
+                pizzaNoDisponible:
+                  value: { success: false, message: 'La pizza "Hawaiana Especial" no está disponible temporalmente.' }
+      x-nota: |
+        - El pedido entra en cocina (estado pendiente) antes de pagarse, también
+          con metodo_pago = stripe. No existe el estado pendiente_pago.
+        - No se comprueba que la mesa exista.
+        - cantidad no tiene máximo; un valor no numérico se convierte en 1.
+        - cliente_telefono debe ser texto: un número JSON provoca 400 con el
+          mensaje "cliente_telefono.trim is not a function".
+        - El total se calcula con coma flotante en JavaScript.
+
+  /api/pedidos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPedido'
+    get:
+      tags: [Pedidos]
+      summary: Detalle de un pedido (seguimiento)
+      operationId: obtenerPedido
+      description: |
+        Es el endpoint que usan las apps para el seguimiento: devuelve `estado`
+        (preparación) y `estado_pago` (pago). No existe `GET /api/pedidos/{id}/estado`.
+      responses:
+        '200':
+          description: Pedido con sus líneas.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data: { $ref: '#/components/schemas/PedidoDetalle' }
+              example:
+                success: true
+                data:
+                  id: 101
+                  tipo_pedido: mesa
+                  mesa_numero: 2
+                  fecha: '2026-10-10T10:00:00.000Z'
+                  estado: en_preparacion
+                  total: '25.50'
+                  cliente_nombre: Carlos Ruiz
+                  cliente_telefono: '600000001'
+                  cliente_direccion: null
+                  metodo_pago: pago_mesa
+                  estado_pago: pendiente
+                  stripe_session_id: null
+                  observaciones: Masa fina bien tostada
+                  lineas:
+                    - { linea_id: 1, pizza_id: 2, nombre: Diávolo Pepperoni, imagen_url: 'https://images.unsplash.com/photo-1628840042765-356cda07504e?auto=format&fit=crop&w=800&q=80', cantidad: 1, precio_unitario: 12.00, subtotal: 12.00, notas: Bien crujiente }
+                    - { linea_id: 2, pizza_id: 3, nombre: Cuatro Quesos Cremosa, imagen_url: 'https://images.unsplash.com/photo-1573821663912-569905455b1c?auto=format&fit=crop&w=800&q=80', cantidad: 1, precio_unitario: 13.50, subtotal: 13.50, notas: null }
+        '404':
+          description: No existe.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { success: false, message: 'Pedido #999 no encontrado' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: |
+        Sin autenticación y con ids secuenciales: cualquiera puede leer los datos
+        personales de cualquier pedido probando ids. Un id no numérico da 500.
+    put:
+      tags: [Pedidos]
+      summary: Modificar pedido (despachador)
+      operationId: modificarPedidoPut
+      description: |
+        Decide qué operación ejecutar según el cuerpo
+        (`backend/src/routes/pedidosRoutes.js`). Se trata como **modificación de
+        comanda** (igual que `/comanda`) si el cuerpo trae `lineas`,
+        `tipo_pedido`, `cliente_nombre`, `mesa_numero`, `descuento`, o `total`
+        sin `estado`. En cualquier otro caso se trata como **cambio de estado**
+        (igual que `/estado`).
+      requestBody: { $ref: '#/components/requestBodies/ModificarPedido' }
+      responses:
+        '200': { $ref: '#/components/responses/DespachadorOk' }
+        '400': { $ref: '#/components/responses/ErrorPeticion' }
+        '404': { $ref: '#/components/responses/PedidoNoEncontrado' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: Ver las notas de /comanda y /estado.
+    patch:
+      tags: [Pedidos]
+      summary: Modificar pedido (despachador, igual que PUT)
+      operationId: modificarPedidoPatch
+      description: Idéntico a `PUT /api/pedidos/{id}`.
+      requestBody: { $ref: '#/components/requestBodies/ModificarPedido' }
+      responses:
+        '200': { $ref: '#/components/responses/DespachadorOk' }
+        '400': { $ref: '#/components/responses/ErrorPeticion' }
+        '404': { $ref: '#/components/responses/PedidoNoEncontrado' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+
+  /api/pedidos/{id}/estado:
+    parameters:
+      - $ref: '#/components/parameters/IdPedido'
+    put:
+      tags: [Pedidos]
+      summary: Cambiar el estado de preparación
+      operationId: cambiarEstadoPedidoPut
+      description: |
+        Valores válidos (CHECK de `pedidos.estado` en database/init.sql):
+        `pendiente`, `en_preparacion`, `en_reparto`, `listo`, `servido`,
+        `entregado`, `cancelado`.
+
+        Si el pedido es de mesa y pasa a `servido`, `entregado` o `cancelado`, la
+        mesa vuelve a `libre` cuando no le quedan pedidos `pendiente`,
+        `en_preparacion` o `listo`.
+      requestBody: { $ref: '#/components/requestBodies/CambioEstado' }
+      responses:
+        '200': { $ref: '#/components/responses/PedidoActualizado' }
+        '400':
+          description: Estado ausente o no válido.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { success: false, message: 'Estado no válido. Opciones permitidas: pendiente, en_preparacion, en_reparto, listo, servido, entregado, cancelado' }
+        '404': { $ref: '#/components/responses/PedidoNoEncontrado' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: |
+        Sin autenticación ni máquina de estados: se acepta cualquier transición
+        (por ejemplo de entregado a pendiente). No toca estado_pago.
+    patch:
+      tags: [Pedidos]
+      summary: Cambiar el estado de preparación (igual que PUT)
+      operationId: cambiarEstadoPedidoPatch
+      requestBody: { $ref: '#/components/requestBodies/CambioEstado' }
+      responses:
+        '200': { $ref: '#/components/responses/PedidoActualizado' }
+        '400':
+          description: Estado ausente o no válido.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/PedidoNoEncontrado' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: Igual que PUT.
+
+  /api/pedidos/{id}/cobro:
+    parameters:
+      - $ref: '#/components/parameters/IdPedido'
+    put:
+      tags: [Pedidos]
+      summary: Registrar el cobro presencial
+      operationId: registrarCobroPut
+      description: Pone `estado_pago = pagado` y, si se envía, cambia `metodo_pago`.
+      requestBody: { $ref: '#/components/requestBodies/Cobro' }
+      responses:
+        '200': { $ref: '#/components/responses/CobroOk' }
+        '404': { $ref: '#/components/responses/PedidoNoEncontrado' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: |
+        Público: cualquiera puede marcar como pagado cualquier pedido sin pasar
+        por Stripe. No comprueba si el pedido está cancelado o ya pagado.
+        importe_entregado y cambio no se guardan; solo se devuelven.
+    post:
+      tags: [Pedidos]
+      summary: Registrar el cobro presencial (igual que PUT)
+      operationId: registrarCobroPost
+      requestBody: { $ref: '#/components/requestBodies/Cobro' }
+      responses:
+        '200': { $ref: '#/components/responses/CobroOk' }
+        '404': { $ref: '#/components/responses/PedidoNoEncontrado' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: Igual que PUT.
+
+  /api/pedidos/{id}/comanda:
+    parameters:
+      - $ref: '#/components/parameters/IdPedido'
+    put:
+      tags: [Pedidos]
+      summary: Modificar la comanda completa
+      operationId: modificarComandaPut
+      description: |
+        Actualiza la cabecera con los campos enviados. Si se envían `lineas`, se
+        borran todas las anteriores y se insertan las nuevas. Si el tipo deja de
+        ser `mesa`, `mesa_numero` pasa a null. Libera la mesa anterior y ocupa
+        la nueva.
+      requestBody: { $ref: '#/components/requestBodies/ModificarComanda' }
+      responses:
+        '200': { $ref: '#/components/responses/ComandaOk' }
+        '400': { $ref: '#/components/responses/ErrorPeticion' }
+        '404': { $ref: '#/components/responses/PedidoNoEncontrado' }
+      x-nota: |
+        - CRÍTICO: acepta precio_unitario por línea, total y descuento enviados
+          por el cliente; Stripe cobra después con esos precio_unitario.
+        - estado se escribe sin validar contra la lista (lo frena el CHECK de BD → 400).
+        - Si el pedido no existe, responde 404 y a continuación el proceso Node
+          se cae (doble liberación del cliente del pool).
+        - Sin autenticación.
+    patch:
+      tags: [Pedidos]
+      summary: Modificar la comanda completa (igual que PUT)
+      operationId: modificarComandaPatch
+      requestBody: { $ref: '#/components/requestBodies/ModificarComanda' }
+      responses:
+        '200': { $ref: '#/components/responses/ComandaOk' }
+        '400': { $ref: '#/components/responses/ErrorPeticion' }
+        '404': { $ref: '#/components/responses/PedidoNoEncontrado' }
+      x-nota: Igual que PUT.
+
+  # ----------------------------------------------------------------------------
+  # MESAS
+  # ----------------------------------------------------------------------------
+  /api/mesas:
+    get:
+      tags: [Mesas]
+      summary: Listar mesas
+      operationId: listarMesas
+      responses:
+        '200':
+          description: Mesas ordenadas por número, con su número de pedidos activos.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  count: { type: integer }
+                  data:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/Mesa'
+                        - type: object
+                          properties:
+                            pedidos_activos_count:
+                              type: string
+                              description: COUNT de pedidos pendiente/en_preparacion/listo (bigint → texto).
+                              example: '1'
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+    post:
+      tags: [Mesas]
+      summary: Crear mesa
+      operationId: crearMesa
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [numero]
+              properties:
+                numero: { type: integer, minimum: 1 }
+                capacidad: { type: integer, default: 4 }
+                estado: { $ref: '#/components/schemas/EstadoMesa' }
+            example: { numero: 9, capacidad: 6 }
+      responses:
+        '201': { $ref: '#/components/responses/MesaRespuesta' }
+        '400':
+          description: Número no válido o ya existente.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { success: false, message: 'La Mesa #9 ya existe en el restaurante' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: Sin autenticación. Un estado no válido llega al CHECK de BD y da 500.
+
+  /api/mesas/{numero}:
+    parameters:
+      - $ref: '#/components/parameters/NumeroMesa'
+    get:
+      tags: [Mesas]
+      summary: Consultar una mesa (app QR)
+      operationId: obtenerMesa
+      responses:
+        '200': { $ref: '#/components/responses/MesaRespuesta' }
+        '404':
+          description: No existe.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { success: false, message: Mesa número 20 no existe en la sala }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+    put:
+      tags: [Mesas]
+      summary: Modificar mesa
+      operationId: modificarMesaPut
+      description: Si cambia el número, los pedidos activos de la mesa pasan al nuevo número.
+      requestBody: { $ref: '#/components/requestBodies/ModificarMesa' }
+      responses:
+        '200': { $ref: '#/components/responses/MesaRespuesta' }
+        '400': { $ref: '#/components/responses/ErrorPeticion' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: Sin autenticación.
+    patch:
+      tags: [Mesas]
+      summary: Modificar mesa (igual que PUT)
+      operationId: modificarMesaPatch
+      requestBody: { $ref: '#/components/requestBodies/ModificarMesa' }
+      responses:
+        '200': { $ref: '#/components/responses/MesaRespuesta' }
+        '400': { $ref: '#/components/responses/ErrorPeticion' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: Sin autenticación.
+    delete:
+      tags: [Mesas]
+      summary: Eliminar mesa
+      operationId: eliminarMesa
+      responses:
+        '200':
+          description: Mesa eliminada (sin `data`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mensaje' }
+              example: { success: true, message: 'Mesa #9 eliminada del plano de sala' }
+        '400':
+          description: Tiene pedidos pendiente, en_preparacion o listo.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: No existe.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: Sin autenticación.
+
+  /api/mesas/{numero}/estado:
+    parameters:
+      - $ref: '#/components/parameters/NumeroMesa'
+    patch:
+      tags: [Mesas]
+      summary: Cambiar el estado de una mesa
+      operationId: cambiarEstadoMesa
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [estado]
+              properties:
+                estado: { $ref: '#/components/schemas/EstadoMesa' }
+            example: { estado: cuenta_pedida }
+      responses:
+        '200': { $ref: '#/components/responses/MesaRespuesta' }
+        '400':
+          description: Estado no válido.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: No existe.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/ErrorInterno' }
+      x-nota: Sin autenticación.
+
+  # ----------------------------------------------------------------------------
+  # PAGOS (STRIPE)
+  # ----------------------------------------------------------------------------
+  /api/pagos/config:
+    get:
+      tags: [Pagos]
+      summary: ¿Está Stripe configurado?
+      operationId: obtenerConfigPagos
+      description: Permite a la app decidir si ofrece el pago online.
+      responses:
+        '200':
+          description: Estado de la configuración.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  stripe_configured: { type: boolean, description: Existe STRIPE_SECRET_KEY. }
+                  webhook_configured: { type: boolean, description: Existe STRIPE_WEBHOOK_SECRET. }
+                  frontend_url:
+                    type: string
+                    nullable: true
+                    description: Valor de FRONTEND_URL (base de las URLs de retorno de Stripe).
+              example:
+                success: true
+                stripe_configured: true
+                webhook_configured: true
+                frontend_url: https://dam-XX.guillermofoix.org
+      x-nota: Expone públicamente la configuración de pagos.
+
+  /api/pagos/crear-sesion:
+    post:
+      tags: [Pagos]
+      summary: Crear la sesión de Stripe Checkout de un pedido
+      operationId: crearSesionPago
+      description: |
+        Crea una sesión de Checkout (modo `payment`, EUR) con una línea por
+        cada línea del pedido (`precio_unitario` × 100, redondeado).
+        Guarda `stripe_session_id` y pone `metodo_pago = stripe` en el pedido.
+        La app debe abrir `url` en el navegador.
+
+        **URLs de retorno** (base = `FRONTEND_URL` sin barra final; si no está
+        definida, `x-forwarded-proto://x-forwarded-host` o el `Host` de la petición
+        quitando `:3000`):
+        - Éxito: `{base}/?pago=exito&pedido_id={id}&session_id={CHECKOUT_SESSION_ID}`
+        - Cancelación: `{base}/?pago=cancelado&pedido_id={id}`
+
+        Ambas apuntan a la **web** (frontend-web, raíz `/`), no a `/app/` ni a un
+        enlace profundo de una app nativa. Una app móvil debe interceptar esas
+        URLs o consultar `GET /api/pedidos/{id}` al volver.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pedido_id]
+              properties:
+                pedido_id: { type: integer, example: 104 }
+      responses:
+        '200':
+          description: Sesión creada (sin envoltorio `data`).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  url: { type: string, format: uri, description: Página de pago de Stripe. }
+                  sessionId: { type: string, description: Id de la sesión (camelCase, única excepción). }
+              example:
+                success: true
+                url: https://checkout.stripe.com/c/pay/cs_test_a1B2c3
+                sessionId: cs_test_a1B2c3
+        '400':
+          description: Falta pedido_id, el pedido ya está pagado o no tiene líneas.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                faltaId:
+                  value: { success: false, message: Falta el parámetro pedido_id }
+                yaPagado:
+                  value: { success: false, message: 'El pedido #104 ya fue pagado anteriormente' }
+        '404':
+          description: El pedido no existe.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { success: false, message: 'El pedido #999 no existe' }
+        '500':
+          description: Error de Stripe o de la base de datos (con su mensaje en `error`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { success: false, message: Error al iniciar la sesión de pago con Stripe, error: Invalid API Key provided }
+        '503':
+          description: Stripe no está configurado (sin STRIPE_SECRET_KEY).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+      x-nota: |
+        - El importe sale de lineas_pedido.precio_unitario, que se puede
+          manipular con /comanda; ignora pedidos.total y descuentos.
+        - No comprueba si el pedido está cancelado.
+        - Sin FRONTEND_URL, la URL de retorno se construye con cabeceras que
+          controla el cliente (X-Forwarded-Host): redirección abierta.
+        - Usa pedido.cliente_email, columna que no existe (siempre vacío).
+
+  /api/pagos/confirmar-sesion:
+    post:
+      tags: [Pagos]
+      summary: Confirmar el pago al volver de Stripe
+      operationId: confirmarSesionPago
+      description: |
+        Consulta la sesión en Stripe. Si `payment_status` es `paid`, pone
+        `estado_pago = pagado`. Si solo se envía `pedido_id`, usa el
+        `stripe_session_id` guardado en el pedido.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Hay que enviar al menos uno de los dos.
+              properties:
+                pedido_id: { type: integer, example: 104 }
+                session_id: { type: string, example: cs_test_a1B2c3 }
+      responses:
+        '200':
+          description: Resultado de la consulta (sin envoltorio `data`).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  estado_pago:
+                    type: string
+                    description: '`pagado` si se confirmó; si no, el payment_status de Stripe (`unpaid`, `no_payment_required`).'
+                  pedido_id:
+                    description: Solo si se marcó como pagado. Se devuelve tal como llegó (número o texto).
+                    oneOf:
+                      - type: integer
+                      - type: string
+                  message: { type: string }
+              examples:
+                pagado:
+                  value: { success: true, estado_pago: pagado, pedido_id: 104 }
+                noPagado:
+                  value: { success: true, estado_pago: unpaid, message: 'Estado actual en Stripe: unpaid' }
+        '400':
+          description: Faltan ambos parámetros o el pedido no tiene sesión de Stripe.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { success: false, message: No se encontró sesión de Stripe asociada }
+        '500':
+          description: Error de Stripe (p. ej. session_id inexistente) o de la base de datos.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Stripe no está configurado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+      x-nota: |
+        CRÍTICO: si se envían pedido_id y session_id, marca como pagado el
+        pedido_id del cuerpo aunque la sesión pertenezca a otro pedido. Con una
+        sesión pagada se puede "pagar" cualquier pedido. Sin autenticación.
+
+  /api/pagos/webhook:
+    post:
+      tags: [Pagos]
+      summary: Webhook de Stripe
+      operationId: recibirWebhookStripe
+      description: |
+        Lo llama Stripe, no las apps. Solo procesa `checkout.session.completed`:
+        toma el pedido de `client_reference_id` (o `metadata.pedido_id`) y pone
+        `estado_pago = pagado`. El resto de eventos se ignoran con 200.
+
+        El cuerpo raw se conserva con `express.json({ verify })` (`req.rawBody`)
+        y se usa para `stripe.webhooks.constructEvent`.
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: false
+          schema: { type: string }
+          description: Firma de Stripe. Si falta, el evento se acepta SIN verificar.
+      requestBody: { $ref: '#/components/requestBodies/EventoStripe' }
+      responses:
+        '200': { $ref: '#/components/responses/WebhookOk' }
+        '400': { $ref: '#/components/responses/WebhookFirmaNoValida' }
+        '500': { $ref: '#/components/responses/WebhookErrorBD' }
+        '503': { $ref: '#/components/responses/WebhookSinStripe' }
+      x-nota: |
+        - CRÍTICO: si falta la cabecera Stripe-Signature o la variable
+          STRIPE_WEBHOOK_SECRET, acepta el JSON tal cual sin verificar firma:
+          cualquiera puede marcar un pedido como pagado.
+        - No es idempotente por event.id (no se guardan los eventos).
+        - No comprueba payment_status (pagos asíncronos se marcan antes de tiempo).
+        - No cambia el estado de preparación del pedido.
+        - Los errores 400/503 son texto plano, no JSON.
+
+  /api/webhooks/stripe:
+    post:
+      tags: [Pagos]
+      summary: Webhook de Stripe (alias)
+      operationId: recibirWebhookStripeAlias
+      description: Alias de `/api/pagos/webhook` definido en `server.js`; mismo comportamiento.
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody: { $ref: '#/components/requestBodies/EventoStripe' }
+      responses:
+        '200': { $ref: '#/components/responses/WebhookOk' }
+        '400': { $ref: '#/components/responses/WebhookFirmaNoValida' }
+        '500': { $ref: '#/components/responses/WebhookErrorBD' }
+        '503': { $ref: '#/components/responses/WebhookSinStripe' }
+      x-nota: Las mismas que /api/pagos/webhook.
+
+components:
+  parameters:
+    IdPizza:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer }
+      x-nota: No se valida; un valor no numérico provoca 500 con el error de PostgreSQL.
+    IdPedido:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, example: 101 }
+      x-nota: No se valida; un valor no numérico provoca 500 (o 400 en /comanda).
+    NumeroMesa:
+      name: numero
+      in: path
+      required: true
+      description: Número visible de la mesa (no su id interno).
+      schema: { type: integer, example: 4 }
+
+  requestBodies:
+    ModificarPedido:
+      required: true
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/ComandaEntrada'
+              - $ref: '#/components/schemas/CambioEstadoEntrada'
+    CambioEstado:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CambioEstadoEntrada' }
+          example: { estado: en_preparacion }
+    Cobro:
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              metodo_pago: { $ref: '#/components/schemas/MetodoPago' }
+              importe_entregado: { type: number, description: Solo se devuelve en detalles_cobro. }
+              cambio: { type: number, description: Solo se devuelve en detalles_cobro. }
+          example: { metodo_pago: efectivo, importe_entregado: 30, cambio: 4.5 }
+    ModificarComanda:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ComandaEntrada' }
+          example:
+            lineas:
+              - { pizza_id: 2, cantidad: 2 }
+            observaciones: Sin picante
+    ModificarMesa:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              numero: { type: integer, description: Nuevo número. }
+              capacidad: { type: integer }
+              estado: { $ref: '#/components/schemas/EstadoMesa' }
+          example: { capacidad: 6 }
+    EventoStripe:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            description: Evento de Stripe (formato oficial de Stripe).
+            additionalProperties: true
+            properties:
+              id: { type: string, example: evt_1Abc }
+              type: { type: string, example: checkout.session.completed }
+              data:
+                type: object
+                properties:
+                  object:
+                    type: object
+                    additionalProperties: true
+                    properties:
+                      id: { type: string, example: cs_test_a1B2c3 }
+                      client_reference_id: { type: string, example: '104' }
+                      metadata:
+                        type: object
+                        properties:
+                          pedido_id: { type: string, example: '104' }
+
+  responses:
+    ErrorInterno:
+      description: Error no controlado (normalmente de PostgreSQL). `error` lleva el mensaje interno.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            success: false
+            message: Error interno al consultar pedidos
+            error: 'invalid input syntax for type integer: "abc"'
+      x-nota: |
+        Se expone el mensaje interno de la base de datos también en producción.
+        Un JSON mal formado en el cuerpo también acaba en 500 (manejador global)
+        con message "Error interno no controlado en el servidor".
+    PedidoNoEncontrado:
+      description: El pedido no existe.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { success: false, message: 'Pedido #999 no encontrado' }
+    PedidoActualizado:
+      description: Estado cambiado. `data` es la fila del pedido, sin líneas.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: true }
+              message: { type: string, example: "Pedido #101 actualizado al estado 'listo'" }
+              data: { $ref: '#/components/schemas/PedidoFila' }
+    MesaRespuesta:
+      description: Mesa.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: true }
+              message: { type: string }
+              data: { $ref: '#/components/schemas/Mesa' }
+          example:
+            success: true
+            data: { id: 4, numero: 4, capacidad: 6, estado: libre }
+
+    DespachadorOk:
+      description: |
+        Según la operación elegida por el despachador: respuesta de
+        `/comanda` (pedido con líneas) o de `/estado` (fila del pedido).
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: true }
+              message: { type: string }
+              data:
+                oneOf:
+                  - $ref: '#/components/schemas/PedidoComanda'
+                  - $ref: '#/components/schemas/PedidoFila'
+    CobroOk:
+      description: Cobro registrado.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: true }
+              message: { type: string, example: 'Cobro del pedido #101 registrado con éxito' }
+              data:
+                allOf:
+                  - $ref: '#/components/schemas/PedidoFila'
+                  - type: object
+                    properties:
+                      lineas:
+                        type: array
+                        items: { $ref: '#/components/schemas/LineaCobro' }
+              detalles_cobro:
+                type: object
+                properties:
+                  metodo_pago: { type: string }
+                  total: { type: string, example: '25.50' }
+                  importe_entregado:
+                    description: El enviado o, si no, el total (texto).
+                    oneOf: [{ type: number }, { type: string }]
+                  cambio: { type: number, example: 0 }
+                  fecha_cobro: { type: string, format: date-time }
+    ComandaOk:
+      description: Comanda modificada.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean, example: true }
+              message: { type: string, example: 'Comanda #101 modificada y actualizada con éxito' }
+              data: { $ref: '#/components/schemas/PedidoComanda' }
+    WebhookOk:
+      description: Evento recibido (procesado o ignorado).
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              received: { type: boolean, example: true }
+    WebhookFirmaNoValida:
+      description: Firma no válida. Texto plano.
+      content:
+        text/plain:
+          schema: { type: string, example: 'Webhook Error: No signatures found matching the expected signature for payload.' }
+    WebhookErrorBD:
+      description: Error al actualizar la base de datos.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string, example: Error procesando webhook }
+    WebhookSinStripe:
+      description: Stripe no configurado. Texto plano.
+      content:
+        text/plain:
+          schema: { type: string, example: Stripe no configurado }
+
+    ErrorPeticion:
+      description: Petición no válida o error al guardar (mensaje en `message`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { success: false, message: La pizza con ID 99 no existe. }
+    NoEncontrado:
+      description: El recurso no existe.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    # --- Genéricos -------------------------------------------------------------
+    Error:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }
+        error:
+          type: string
+          description: Mensaje interno de PostgreSQL o Stripe (no siempre presente).
+    Mensaje:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+    Salud:
+      type: object
+      properties:
+        status: { type: string, enum: [UP, DEGRADED] }
+        service: { type: string, example: pizzeria-backend }
+        timestamp: { type: string, format: date-time }
+        database:
+          type: object
+          properties:
+            connected: { type: boolean }
+            db_time: { type: string, format: date-time }
+            error: { type: string }
+
+    # --- Catálogo --------------------------------------------------------------
+    Categoria:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        nombre: { type: string, example: Clásicas }
+        icono: { type: string, description: Emoji., example: '🍕' }
+    Ingrediente:
+      type: object
+      properties:
+        id: { type: integer, example: 2 }
+        nombre: { type: string, example: Mozzarella }
+        alergeno:
+          type: boolean
+          description: true si el ingrediente es alérgeno. No se indica cuál (gluten, lactosa…).
+          example: true
+    PizzaFila:
+      type: object
+      description: Fila de la tabla pizzas (respuestas de crear, modificar y borrar).
+      properties:
+        id: { type: integer }
+        nombre: { type: string }
+        descripcion: { type: string }
+        precio: { $ref: '#/components/schemas/ImporteTexto' }
+        imagen_url: { $ref: '#/components/schemas/ImagenUrl' }
+        categoria_id: { type: integer, nullable: true }
+        disponible: { type: boolean }
+        creado_en: { type: string, format: date-time }
+    Pizza:
+      type: object
+      description: Pizza de la carta con su categoría e ingredientes (no incluye creado_en).
+      properties:
+        id: { type: integer, example: 1 }
+        nombre: { type: string, example: Margherita Clásica }
+        descripcion: { type: string }
+        precio: { $ref: '#/components/schemas/ImporteTexto' }
+        imagen_url: { $ref: '#/components/schemas/ImagenUrl' }
+        disponible: { type: boolean }
+        categoria_id: { type: integer, nullable: true }
+        categoria_nombre: { type: string, nullable: true }
+        categoria_icono: { type: string, nullable: true }
+        ingredientes:
+          type: array
+          description: Vacío si la pizza no tiene ingredientes asociados.
+          items: { $ref: '#/components/schemas/Ingrediente' }
+    PizzaEntrada:
+      type: object
+      required: [nombre, precio]
+      properties:
+        nombre: { type: string, maxLength: 100 }
+        descripcion: { type: string }
+        precio: { type: number, description: Euros (se acepta número o texto numérico). }
+        imagen_url: { type: string }
+        categoria_id: { type: integer }
+        ingredientes_ids:
+          type: array
+          items: { type: integer }
+    ImagenUrl:
+      type: string
+      nullable: true
+      description: |
+        URL absoluta tal como se guardó en la base de datos. Las semillas usan
+        imágenes externas de images.unsplash.com; el backend no sirve imágenes.
+      example: https://images.unsplash.com/photo-1604382354936-07c5d9983bd3?auto=format&fit=crop&w=800&q=80
+    ImporteTexto:
+      type: string
+      pattern: '^\d+\.\d{2}$'
+      description: Importe en euros con 2 decimales, como texto (columna NUMERIC).
+      example: '9.50'
+
+    # --- Pedidos ---------------------------------------------------------------
+    TipoPedido:
+      type: string
+      description: CHECK de pedidos.tipo_pedido en database/init.sql.
+      enum: [mesa, domicilio, recoger]
+    EstadoPedido:
+      type: string
+      description: CHECK de pedidos.estado en database/init.sql. Sin máquina de estados.
+      enum: [pendiente, en_preparacion, en_reparto, listo, servido, entregado, cancelado]
+    EstadoPago:
+      type: string
+      description: |
+        Valores que escribe el código. La columna no tiene CHECK. Solo pasa a
+        `pagado` por Stripe (webhook o confirmar-sesion) o por /cobro.
+      enum: [pendiente, pagado]
+      x-nota: No existe el valor fallido ni se registra un pago rechazado.
+    MetodoPago:
+      type: string
+      description: |
+        Texto libre (sin CHECK). Por defecto `efectivo_entrega`. Valores usados
+        por los frontends: `efectivo_entrega`, `tarjeta_entrega`,
+        `tarjeta_recogida`, `pago_mesa`, `stripe`, `efectivo`, `datafono`, `en_mano`.
+      example: efectivo_entrega
+    LineaEntrada:
+      type: object
+      required: [pizza_id]
+      properties:
+        pizza_id: { type: integer, example: 1 }
+        cantidad: { type: integer, default: 1, example: 2 }
+        notas: { type: string, nullable: true, maxLength: 255 }
+    PedidoEntrada:
+      type: object
+      required: [lineas]
+      properties:
+        tipo_pedido: { $ref: '#/components/schemas/TipoPedido' }
+        tipo_entrega:
+          type: string
+          description: Alias de tipo_pedido (se usa si este falta).
+        mesa_numero: { type: integer, description: Obligatorio si tipo_pedido = mesa. }
+        cliente_nombre:
+          type: string
+          description: Obligatorio en domicilio y recoger. En mesa, por defecto "Cliente Mesa N".
+        cliente_telefono:
+          type: string
+          description: Obligatorio en domicilio y recoger. Debe ser texto.
+        telefono: { type: string, description: Alias de cliente_telefono. }
+        cliente_direccion: { type: string, description: Obligatorio en domicilio. }
+        direccion_entrega: { type: string, description: Alias de cliente_direccion. }
+        metodo_pago: { $ref: '#/components/schemas/MetodoPago' }
+        observaciones: { type: string, nullable: true }
+        lineas:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/LineaEntrada' }
+    CambioEstadoEntrada:
+      type: object
+      required: [estado]
+      properties:
+        estado: { $ref: '#/components/schemas/EstadoPedido' }
+    ComandaEntrada:
+      type: object
+      description: Todos los campos son opcionales; los no enviados se conservan.
+      properties:
+        tipo_pedido: { $ref: '#/components/schemas/TipoPedido' }
+        mesa_numero: { type: integer, nullable: true }
+        cliente_nombre: { type: string }
+        cliente_telefono: { type: string }
+        cliente_direccion: { type: string }
+        observaciones: { type: string }
+        estado: { $ref: '#/components/schemas/EstadoPedido' }
+        lineas:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/LineaEntrada'
+              - type: object
+                properties:
+                  precio_unitario:
+                    type: number
+                    description: Si se envía, sustituye al precio de la carta.
+                    x-nota: Permite al cliente fijar el precio.
+        descuento: { type: number, description: Se resta del total calculado. }
+        total:
+          type: number
+          description: Si se envía, sustituye al total calculado (tiene prioridad sobre descuento).
+          x-nota: Permite al cliente fijar el total.
+    PedidoFila:
+      type: object
+      description: Fila de la tabla pedidos.
+      properties:
+        id: { type: integer, example: 101 }
+        tipo_pedido: { $ref: '#/components/schemas/TipoPedido' }
+        mesa_numero: { type: integer, nullable: true }
+        fecha: { type: string, format: date-time }
+        estado: { $ref: '#/components/schemas/EstadoPedido' }
+        total: { $ref: '#/components/schemas/ImporteTexto' }
+        cliente_nombre: { type: string }
+        cliente_telefono: { type: string, nullable: true }
+        cliente_direccion: { type: string, nullable: true }
+        metodo_pago: { $ref: '#/components/schemas/MetodoPago' }
+        estado_pago: { $ref: '#/components/schemas/EstadoPago' }
+        stripe_session_id: { type: string, nullable: true }
+        observaciones: { type: string, nullable: true }
+    PedidoDetalle:
+      description: Pedido con líneas (GET /api/pedidos y GET /api/pedidos/{id}).
+      allOf:
+        - $ref: '#/components/schemas/PedidoFila'
+        - type: object
+          properties:
+            lineas:
+              type: array
+              items: { $ref: '#/components/schemas/LineaDetalle' }
+    PedidoCreado:
+      description: Respuesta de POST /api/pedidos.
+      allOf:
+        - $ref: '#/components/schemas/PedidoFila'
+        - type: object
+          properties:
+            lineas:
+              type: array
+              items: { $ref: '#/components/schemas/LineaCreada' }
+    PedidoComanda:
+      description: Respuesta de /comanda.
+      allOf:
+        - $ref: '#/components/schemas/PedidoFila'
+        - type: object
+          properties:
+            lineas:
+              type: array
+              items: { $ref: '#/components/schemas/LineaComanda' }
+    LineaDetalle:
+      type: object
+      description: Línea construida con json_agg; los importes salen como NÚMERO.
+      x-nota: Formato distinto según el endpoint (ver LineaCreada, LineaComanda, LineaCobro).
+      properties:
+        linea_id: { type: integer }
+        pizza_id: { type: integer }
+        nombre: { type: string }
+        imagen_url: { $ref: '#/components/schemas/ImagenUrl' }
+        cantidad: { type: integer }
+        precio_unitario: { type: number, example: 12.0 }
+        subtotal: { type: number, example: 12.0 }
+        notas: { type: string, nullable: true }
+    LineaCreada:
+      type: object
+      description: Línea en la respuesta de creación (sin linea_id, importe como número).
+      properties:
+        pizza_id: { type: integer }
+        nombre: { type: string }
+        cantidad: { type: integer }
+        precio_unitario: { type: number, example: 9.5 }
+        notas: { type: string, nullable: true }
+    LineaComanda:
+      type: object
+      description: Línea en la respuesta de /comanda (importes como TEXTO).
+      properties:
+        linea_id: { type: integer }
+        pizza_id: { type: integer }
+        nombre: { type: string }
+        imagen_url: { $ref: '#/components/schemas/ImagenUrl' }
+        cantidad: { type: integer }
+        precio_unitario: { $ref: '#/components/schemas/ImporteTexto' }
+        subtotal: { $ref: '#/components/schemas/ImporteTexto' }
+        notas: { type: string, nullable: true }
+    LineaCobro:
+      type: object
+      description: Línea en la respuesta de /cobro (campo id en lugar de linea_id, importe como TEXTO).
+      properties:
+        id: { type: integer }
+        cantidad: { type: integer }
+        precio_unitario: { $ref: '#/components/schemas/ImporteTexto' }
+        notas: { type: string, nullable: true }
+        nombre: { type: string }
+
+    # --- Mesas -----------------------------------------------------------------
+    EstadoMesa:
+      type: string
+      description: CHECK de mesas.estado en database/init.sql.
+      enum: [libre, ocupada, cuenta_pedida, reservada]
+    Mesa:
+      type: object
+      properties:
+        id: { type: integer }
+        numero: { type: integer, example: 4 }
+        capacidad: { type: integer, example: 6 }
+        estado: { $ref: '#/components/schemas/EstadoMesa' }
