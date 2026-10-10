@@ -1,6 +1,7 @@
 package es.fpmola.pizzeria.di
 
 import es.fpmola.pizzeria.ajustes.AjustesServidor
+import es.fpmola.pizzeria.carrito.Carrito
 import es.fpmola.pizzeria.catalogo.RepositorioCatalogo
 import es.fpmola.pizzeria.salud.RepositorioSalud
 import org.koin.core.component.KoinComponent
@@ -16,4 +17,5 @@ internal object Dependencias : KoinComponent {
     fun ajustes(): AjustesServidor = get()
     fun repositorioSalud(): RepositorioSalud = get()
     fun repositorioCatalogo(): RepositorioCatalogo = get()
+    fun carrito(): Carrito = get()
 }

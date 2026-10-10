@@ -1,5 +1,6 @@
 package es.fpmola.pizzeria.di
 
+import es.fpmola.pizzeria.carrito.Carrito
 import es.fpmola.pizzeria.catalogo.RepositorioCatalogo
 import es.fpmola.pizzeria.red.ClienteApi
 import es.fpmola.pizzeria.salud.RepositorioSalud
@@ -16,6 +17,8 @@ val moduloComun: Module = module {
     single { ClienteApi(ajustes = get(), motor = get()) }
     single { RepositorioSalud(cliente = get()) }
     single { RepositorioCatalogo(cliente = get()) }
+    // Un único carrito en memoria, compartido por todas las pantallas.
+    single { Carrito() }
 }
 
 /** Lista completa de módulos de la app a partir del módulo de la plataforma. */
