@@ -1,45 +1,64 @@
 package es.fpmola.pizzeria
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import es.fpmola.pizzeria.di.Dependencias
 import es.fpmola.pizzeria.ui.AvisoDemo
+import es.fpmola.pizzeria.ui.configuracion.ConfiguracionViewModel
+import es.fpmola.pizzeria.ui.configuracion.PantallaConfiguracion
+import es.fpmola.pizzeria.ui.inicio.PantallaInicio
 import es.fpmola.pizzeria.ui.tema.TemaPizzeria
 
+/** Pantallas de la app. La navegación es un simple estado, sin librería. */
+private enum class Pantalla { Configuracion, Inicio }
+
 /**
- * Raíz de la app: tema de la pizzería y aviso de demo siempre visible.
+ * Raíz de la app: tema de la pizzería, aviso de demo siempre visible y
+ * navegación entre configuración del servidor e inicio.
  */
 @Composable
 fun App() {
     TemaPizzeria {
+        var pantalla by rememberSaveable { mutableStateOf(Pantalla.Configuracion) }
+
         Scaffold(bottomBar = { AvisoDemo() }) { relleno ->
-            Box(
-                modifier = Modifier
-                    .padding(relleno)
-                    .fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = "Pizzería Bella Napoli",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.primary,
+            val modificador = Modifier
+                .padding(relleno)
+                .fillMaxSize()
+
+            when (pantalla) {
+                Pantalla.Configuracion -> {
+                    val modelo = viewModel {
+                        ConfiguracionViewModel(
+                            ajustes = Dependencias.ajustes(),
+                            repositorioSalud = Dependencias.repositorioSalud(),
+                        )
+                    }
+                    PantallaConfiguracion(
+                        estado = modelo.estado,
+                        alCambiarUrl = modelo::cambiarUrl,
+                        alProbarConexion = modelo::probarConexion,
+                        alGuardar = {
+                            if (modelo.guardarUrl()) pantalla = Pantalla.Inicio
+                        },
+                        modifier = modificador,
                     )
-                    Text(
-                        text = "App de clientes",
-                        style = MaterialTheme.typography.bodyLarge,
+                }
+                Pantalla.Inicio -> {
+                    val urlServidor = remember { Dependencias.ajustes().obtenerUrlBase() }
+                    PantallaInicio(
+                        urlServidor = urlServidor,
+                        alCambiarServidor = { pantalla = Pantalla.Configuracion },
+                        modifier = modificador,
                     )
                 }
             }
