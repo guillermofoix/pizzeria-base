@@ -53,8 +53,24 @@ const val JSON_PEDIDO_CREADO = """
 }
 """
 
+/** Respuesta de POST /api/pedidos de un pedido pagado con tarjeta (metodo_pago stripe). */
+val JSON_PEDIDO_CREADO_TARJETA: String = JSON_PEDIDO_CREADO.replace("efectivo_entrega", "stripe")
+
+/** Respuesta de POST /api/pagos/crear-sesion (sin envoltorio {success,data}). */
+const val JSON_SESION_PAGO = """
+{
+  "success": true,
+  "url": "https://checkout.stripe.com/c/pay/cs_test_a1B2c3#fidkdWxOYHwnPyd1blpxYHZxWjA0",
+  "sessionId": "cs_test_a1B2c3"
+}
+"""
+
 /** Respuesta de GET /api/pedidos/104 con el estado indicado. */
-fun jsonPedido(estado: String, estadoPago: String = "pendiente"): String = """
+fun jsonPedido(
+    estado: String,
+    estadoPago: String = "pendiente",
+    metodoPago: String = "efectivo_entrega",
+): String = """
 {
   "success": true,
   "data": {
@@ -67,7 +83,7 @@ fun jsonPedido(estado: String, estadoPago: String = "pendiente"): String = """
     "cliente_nombre": "Ana López",
     "cliente_telefono": "600123456",
     "cliente_direccion": "Calle Mayor 1, 2º A",
-    "metodo_pago": "efectivo_entrega",
+    "metodo_pago": "$metodoPago",
     "estado_pago": "$estadoPago",
     "stripe_session_id": null,
     "observaciones": "Llamar al timbre",
