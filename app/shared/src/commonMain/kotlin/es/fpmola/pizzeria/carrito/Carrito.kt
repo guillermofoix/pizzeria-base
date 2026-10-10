@@ -96,7 +96,9 @@ class Carrito {
             lineas.map { if (it.pizzaId == pizza.id) lineaNueva else it }
         }
 
-        return if (actual + pedida > CANTIDAD_MAXIMA) {
+        // Se compara la cantidad pedida sin recortar, para avisar también si
+        // pedía más de las que caben.
+        return if (cantidad > CANTIDAD_MAXIMA - actual) {
             ResultadoAnadir.LimiteAlcanzado
         } else {
             ResultadoAnadir.Anadida
